@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Меню сообщества — установка виджета</title>
+  <title>Меню сообщества — управление виджетом</title>
   <style>
     :root {
       --bg: #19191a;
@@ -22,52 +22,50 @@
       margin: 0;
       background: var(--bg);
       color: var(--text);
-      font: 15px/1.4 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      padding: 16px;
-      padding-bottom: 40px;
+      font: 15px/1.45 -apple-system, "Segoe UI", Roboto, "Segoe UI Emoji", Helvetica, Arial, sans-serif;
+      padding: 12px;
+      padding-bottom: 48px;
+      -webkit-text-size-adjust: 100%;
     }
-    h1 { font-size: 18px; margin: 0 0 4px; }
-    .hint { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+    h1 { font-size: 18px; margin: 0; }
+    h2 { font-size: 14px; margin: 0 0 8px; color: var(--muted); font-weight: 600; }
+    .chip { font-size: 12px; color: var(--muted); margin-top: 2px; word-break: break-word; }
     .card {
       background: var(--card);
       border: 1px solid var(--line);
       border-radius: 12px;
       padding: 14px;
-      margin-bottom: 14px;
+      margin-bottom: 12px;
     }
-    .card h2 { font-size: 14px; margin: 0 0 10px; color: var(--muted); font-weight: 600; text-transform: none; }
-    /* превью виджета — максимально похоже на блок в сообществе */
-    .widget {
-      background: var(--card2);
-      border-radius: 10px;
-      padding: 14px 16px;
-    }
-    .widget-title { font-weight: 600; margin-bottom: 12px; }
-    .widget-grid { display: grid; gap: 8px 14px; }
-    .widget-grid a { color: var(--accent); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .widget-grid a:hover { text-decoration: underline; }
-    .widget-rows a { display: block; padding: 6px 0; border-bottom: 1px solid var(--line); }
-    .widget-rows a:last-child { border-bottom: 0; }
+    .hint { color: var(--muted); font-size: 13px; margin-bottom: 10px; }
+    .hint code { color: var(--text); }
     label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
     input, select, textarea {
-      width: 100%; padding: 10px 12px; border-radius: 8px;
+      width: 100%; padding: 11px 12px; border-radius: 8px;
       border: 1px solid var(--line); background: var(--card2); color: var(--text);
-      font: inherit; font-size: 14px;
+      font: inherit; font-size: 15px;
     }
-    textarea { min-height: 150px; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+    textarea { min-height: 190px; font-family: ui-monospace, Consolas, monospace; font-size: 14px; line-height: 1.6; }
     button {
       appearance: none; border: 0; border-radius: 8px; cursor: pointer;
       background: var(--accent); color: #fff; font: inherit; font-weight: 600;
-      padding: 11px 16px; margin: 6px 8px 0 0;
+      padding: 12px 16px; margin: 8px 8px 0 0;
     }
     button:hover { background: var(--accent-hover); }
     button.secondary { background: var(--card2); border: 1px solid var(--line); color: var(--text); }
     button:disabled { opacity: .5; cursor: not-allowed; }
-    .log { font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+    .log { font-size: 12px; white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow: auto; }
     .log .ok { color: var(--ok); }
     .log .err { color: var(--err); }
     .log .muted { color: var(--muted); }
-    .warn { background: rgba(230,70,70,.12); border: 1px solid rgba(230,70,70,.4); color: #ffb3b3; }
+    .alert { background: rgba(230,70,70,.12); border: 1px solid rgba(230,70,70,.45); color: #ffc2c2; }
+    .alert b { color: #fff; }
+    .widget { background: var(--card2); border-radius: 10px; padding: 14px 16px; }
+    .widget-title { font-weight: 600; margin-bottom: 12px; }
+    .widget-grid { display: grid; gap: 8px 14px; }
+    .widget-grid a { color: var(--accent); text-decoration: none; overflow: hidden; text-overflow: ellipsis; }
+    .widget-rows a { display: block; padding: 6px 0; border-bottom: 1px solid var(--line); color: var(--accent); text-decoration: none; }
+    .widget-rows a:last-child { border-bottom: 0; }
     .linkrow { padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
     .linkrow:last-child { border-bottom: 0; }
     .linkrow a { color: var(--accent); text-decoration: none; word-break: break-all; }
@@ -75,55 +73,67 @@
   </style>
 </head>
 <body>
-  <h1>Меню сообщества</h1>
-  <div class="hint">
-    Бесплатная замена платному виджету «Навигация». Приложение ставит в сообщество виджет-список
-    (виджет сообщества), который появляется в верхней части страницы — на сайте и в мобильных приложениях.
+  <div class="card">
+    <h1>Меню сообщества «Умка»</h1>
+    <div class="chip" id="statusline">Загружаю…</div>
+  </div>
+
+  <div class="card alert" id="fatal" hidden></div>
+
+  <div class="card">
+    <h2>Пункты меню</h2>
+    <div class="hint">
+      Одна строка — один пункт: <code>Название | хештег</code>.
+      Вместо хештега можно вставить целую ссылку ВК. Пустые строки игнорируются.
+    </div>
+    <textarea id="items" spellcheck="false"></textarea>
+    <label for="mode">Куда ведут ссылки из хештегов</label>
+    <select id="mode">
+      <option value="community">Поиск по хештегу внутри сообщества</option>
+      <option value="hashtag">Общий поиск ВК по хештегу (запасной вариант)</option>
+    </select>
+    <div>
+      <button id="btn-save">Сохранить</button>
+      <button id="btn-apply">Обновить виджет в сообществе</button>
+      <button id="btn-reset" class="secondary">Сбросить к стандартным</button>
+    </div>
   </div>
 
   <div class="card">
-    <h2>Предпросмотр (так будет выглядеть блок)</h2>
+    <h2>Сообщество</h2>
+    <label for="group">ID сообщества (число без минуса)</label>
+    <input id="group" inputmode="numeric" placeholder="например 212278594" />
+    <div>
+      <button id="btn-add" class="secondary">Добавить приложение в сообщество</button>
+      <button id="btn-context" class="secondary">Открыть в контексте сообщества</button>
+    </div>
+    <div class="hint" style="margin-top:10px">
+      Виджет ставится и обновляется только из приложения, открытого <b>внутри сообщества</b>.
+      Если ID ещё не подставился сам — возьмите его из адреса сообщества или из настроек.
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Предпросмотр</h2>
     <div class="widget" id="preview"></div>
   </div>
 
   <div class="card">
-    <h2>Ссылки пунктов — проверьте, что открывается поиск по хештегу</h2>
-    <div class="hint">Откройте пару ссылок в ВК. Если выдача пустая — значит публикаций с таким хештегом ещё нет.</div>
+    <h2>Ссылки пунктов</h2>
+    <div class="hint">Нажмите пару ссылок и убедитесь, что открывается поиск по хештегу.</div>
     <div id="links"></div>
   </div>
 
   <div class="card">
-    <h2>1. Добавить приложение в сообщество</h2>
-    <div class="hint">Нажмите кнопку и выберите сообщество <b>vk.ru/ymka32020</b>.</div>
-    <button id="btn-add">Добавить в сообщество</button>
-    <div class="log" id="log-add"></div>
-  </div>
-
-  <div class="card">
-    <h2>2. Установить / обновить виджет</h2>
-    <div class="hint">Устанавливать нужно от имени администратора сообщества.</div>
-    <label for="mode">Куда ведут пункты меню</label>
-    <select id="mode">
-      <option value="community">Поиск по хештегу внутри сообщества (рекомендуется)</option>
-      <option value="hashtag">Общий поиск ВК по хештегу (запасной вариант)</option>
-    </select>
-    <label for="group">ID сообщества (число, без минуса)</label>
-    <input id="group" inputmode="numeric" placeholder="212278594" />
-    <button id="btn-install">Установить виджет</button>
-    <button id="btn-code" class="secondary">Показать код виджета</button>
-    <div class="log" id="log-install"></div>
-    <textarea id="code" hidden readonly></textarea>
-  </div>
-
-  <div class="card" id="outside" hidden>
-    <h2>Приложение открыто вне ВКонтакте</h2>
-    <div class="hint">
-      Установка виджета работает только внутри ВК. Откройте приложение по ссылке
-      <b>https://vk.com/app&lt;ID&gt;</b> (в приложении ВК — отправьте ссылку себе в «Избранное»).
+    <h2>Журнал</h2>
+    <div class="log" id="log"></div>
+    <div>
+      <button id="btn-log" class="secondary">Скопировать журнал</button>
+      <button id="btn-params" class="secondary">Данные запуска</button>
     </div>
   </div>
 
-  <script src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js"></script>
+  <script src="vk-bridge.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
