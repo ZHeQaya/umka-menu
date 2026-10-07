@@ -62,10 +62,14 @@
     .alert b { color: #fff; }
     .widget { background: var(--card2); border-radius: 10px; padding: 14px 16px; }
     .widget-title { font-weight: 600; margin-bottom: 12px; }
-    .widget-grid { display: grid; gap: 8px 14px; }
-    .widget-grid a { color: var(--accent); text-decoration: none; overflow: hidden; text-overflow: ellipsis; }
-    .widget-rows a { display: block; padding: 6px 0; border-bottom: 1px solid var(--line); color: var(--accent); text-decoration: none; }
+    .widget-rows a { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); color: var(--accent); text-decoration: none; }
     .widget-rows a:last-child { border-bottom: 0; }
+    .widget-grid a { display: flex; align-items: center; gap: 8px; color: var(--accent); text-decoration: none; overflow: hidden; text-overflow: ellipsis; }
+    .item-pic { width: 22px; height: 22px; border-radius: 50%; flex: 0 0 auto; }
+    .widget-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .tile { display: flex; flex-direction: column; align-items: center; gap: 6px; text-decoration: none; color: var(--accent); }
+    .tile-pic { width: 100%; max-width: 96px; aspect-ratio: 1 / 1; border-radius: 14px; }
+    .tile-cap { font-size: 12px; text-align: center; line-height: 1.25; }
     .linkrow { padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
     .linkrow:last-child { border-bottom: 0; }
     .linkrow a { color: var(--accent); text-decoration: none; word-break: break-all; }
@@ -87,6 +91,17 @@
       Вместо хештега можно вставить целую ссылку ВК. Пустые строки игнорируются.
     </div>
     <textarea id="items" spellcheck="false"></textarea>
+    <label for="iconmode">Иконка пунктов</label>
+    <select id="iconmode">
+      <option value="logo">Логотип Умки (иконка приложения)</option>
+      <option value="emoji">Эмодзи мишки 🐻 перед названием</option>
+    </select>
+    <label for="type">Вид блока в сообществе</label>
+    <select id="type">
+      <option value="tiles">Плитки с логотипом — по логотипу на каждом пункте</option>
+      <option value="table">Таблица (сетка) — логотип только в левой колонке</option>
+      <option value="list">Список — до 6 пунктов, логотип у каждого</option>
+    </select>
     <label for="mode">Куда ведут ссылки из хештегов</label>
     <select id="mode">
       <option value="community">Поиск по хештегу внутри сообщества</option>

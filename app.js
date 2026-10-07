@@ -17,12 +17,17 @@
 /* Значения по умолчанию. Их видно при первом запуске и после «Сбросить». */
 const CONFIG = {
   title: 'Добрый день, Ульяна!',
-  icon: '🐻',              // иконка перед пунктами: 🐻 или 🐻❄️
+  // Иконка пунктов:
+  //  'logo'  — логотип Умки (иконка приложения, icon_id = app<ID>);
+  //  'emoji' — эмодзи медвежонка 🐻 перед названием.
+  iconMode: 'logo',
+  icon: '🐻',              // эмодзи для режима 'emoji'
   community: 'ymka32020',  // короткое имя сообщества
   appId: 54809979,         // ID мини-приложения (короткий адрес vk.com/app54809979)
   groupId: 212278594,      // ID сообщества Умка (vk.com/club212278594)
   columns: 2,              // колонок в таблице-виджете (2 или 3, максимум 6)
-  widgetType: 'table',     // 'table' (до 6×11) или 'list' (до 6 пунктов)
+  // 'tiles' — плитки с логотипом (3–10 шт.), 'table' — сетка, 'list' — список (до 6)
+  widgetType: 'tiles',
   searchMode: 'community', // 'community' — поиск в сообществе, 'hashtag' — общий поиск ВК
   items: [
     { text: '«Умка» — это люди', hashtag: 'УмкаЭтоЛюди' },
@@ -50,6 +55,7 @@ const STORAGE_PREFIX = 'umka_menu_';
 /** Состояние: копия CONFIG, которую правит пользователь. */
 const state = {
   title: CONFIG.title,
+  iconMode: CONFIG.iconMode,
   icon: CONFIG.icon,
   columns: CONFIG.columns,
   widgetType: CONFIG.widgetType,
@@ -62,9 +68,17 @@ const state = {
   bridgeOk: false,
 };
 
-/** Подпись пункта: общая иконка + текст. */
+/** Подпись пункта. В режиме эмодзи — с медвежонком перед названием. */
 function itemLabel(item) {
-  return (state.icon ? state.icon + ' ' : '') + item.text;
+  if (state.iconMode === 'emoji' && state.icon) return state.icon + ' ' + item.text;
+  return item.text;
+}
+
+/** Идентификатор картинки-иконки для виджета: иконка приложения = логотип Умки. */
+function itemIconId() {
+  if (state.iconMode !== 'logo') return null;
+  const appId = state.appId || CONFIG.appId;
+  return appId ? 'app' + appId : null;
 }
 
 /** Ссылка пункта: либо заданная явно, либо поиск по хештегу. */
@@ -81,8 +95,21 @@ function itemUrl(item) {
 function buildWidgetCode() {
   const items = state.items.filter((i) => i && i.text);
   const widget = { title: state.title };
+  const iconId = itemIconId();
 
-  if (state.widgetType === 'table') {
+  if (state.widgetType === 'tiles') {
+    // Плитки: у каждой — логотип Умки (иконка приложения) и подпись.
+    widget.tiles = items.slice(0, 10).map((item) => {
+      const tile = {
+        title: itemLabel(item),
+        url: itemUrl(item),
+      };
+      if (iconId) tile.icon_id = iconId;
+      const tag = String(item.hashtag || '').replace(/^#/, '');
+      if (tag && !item.url) tile.descr = '#' + tag;
+      return tile;
+    });
+  } else if (state.widgetType === 'table') {
     const columns = Math.min(Math.max(1, state.columns), MAX_TABLE_COLUMNS);
     const rows = items.slice(0, columns * MAX_TABLE_ROWS);
     const body = [];
@@ -90,16 +117,25 @@ function buildWidgetCode() {
       const row = [];
       for (let j = 0; j < columns; j++) {
         const item = rows[i + j];
-        row.push(item ? { text: itemLabel(item), url: itemUrl(item) } : { text: '\u00A0' });
+        if (!item) {
+          row.push({ text: '\u00A0' });
+          continue;
+        }
+        const cell = { text: itemLabel(item), url: itemUrl(item) };
+        // В таблице картинка допустима только в первой ячейке строки.
+        if (iconId && j === 0) cell.icon_id = iconId;
+        row.push(cell);
       }
       body.push(row);
     }
     widget.body = body;
   } else {
-    widget.rows = items.slice(0, MAX_LIST_ITEMS).map((item) => ({
-      title: itemLabel(item),
-      title_url: itemUrl(item),
-    }));
+    // list / compact_list: картинка должна быть либо у всех пунктов, либо ни у кого.
+    widget.rows = items.slice(0, MAX_LIST_ITEMS).map((item) => {
+      const row = { title: itemLabel(item), title_url: itemUrl(item) };
+      if (iconId) row.icon_id = iconId;
+      return row;
+    });
   }
 
   // параметр code — строка с VKScript, заканчивающаяся точкой с запятой
@@ -134,9 +170,18 @@ function itemsToText(items) {
 function validate() {
   const problems = [];
   if (!state.items.length) problems.push('Список пунктов пуст.');
-  if (state.widgetType === 'table') {
+  if (state.widgetType === 'tiles') {
+    if (state.items.length < 3) problems.push('Для плиток нужно минимум 3 пункта.');
+    if (state.items.length > 10) problems.push('Для плиток максимум 10 пунктов — сейчас ' + state.items.length + '.');
+    if (state.iconMode === 'logo' && !(state.appId || CONFIG.appId)) {
+      problems.push('Не известен ID приложения — логотип в плитках не подставится.');
+    }
+  } else if (state.widgetType === 'table') {
     if (state.columns < 1 || state.columns > MAX_TABLE_COLUMNS) problems.push('Колонок должно быть от 1 до 6.');
     if (state.items.length > state.columns * MAX_TABLE_ROWS) problems.push('Слишком много пунктов для таблицы.');
+    if (state.iconMode === 'logo' && state.columns > 1) {
+      problems.push('В таблице логотип встанет только в левую колонку. Для логотипа у всех пунктов выберите «Плитки» или список в 1 колонку.');
+    }
   } else if (state.items.length > MAX_LIST_ITEMS) {
     problems.push('Для списка максимум 6 пунктов — сейчас ' + state.items.length + '.');
   }
@@ -158,6 +203,7 @@ function storageKey() {
 function serializeConfig() {
   return JSON.stringify({
     title: state.title,
+    iconMode: state.iconMode,
     icon: state.icon,
     columns: state.columns,
     widgetType: state.widgetType,
@@ -170,9 +216,12 @@ function serializeConfig() {
 function applyConfig(data) {
   if (!data || typeof data !== 'object') return;
   if (typeof data.title === 'string') state.title = data.title;
+  if (data.iconMode === 'logo' || data.iconMode === 'emoji') state.iconMode = data.iconMode;
   if (typeof data.icon === 'string') state.icon = data.icon;
   if (Number(data.columns) > 0) state.columns = Number(data.columns);
-  if (data.widgetType === 'table' || data.widgetType === 'list') state.widgetType = data.widgetType;
+  if (data.widgetType === 'table' || data.widgetType === 'list' || data.widgetType === 'tiles') {
+    state.widgetType = data.widgetType;
+  }
   if (data.searchMode === 'community' || data.searchMode === 'hashtag') state.searchMode = data.searchMode;
   if (Array.isArray(data.items) && data.items.length) {
     state.items = data.items
@@ -235,37 +284,62 @@ function renderStatus() {
 function renderPreview() {
   const box = $('preview');
   box.innerHTML = '';
+  const useLogo = state.iconMode === 'logo';
 
   const title = document.createElement('div');
   title.className = 'widget-title';
   title.textContent = state.title;
   box.appendChild(title);
 
-  if (state.widgetType === 'table') {
+  if (state.widgetType === 'tiles') {
     const grid = document.createElement('div');
-    grid.className = 'widget-grid';
-    grid.style.gridTemplateColumns = 'repeat(' + Math.min(state.columns, 3) + ', minmax(0, 1fr))';
-    state.items.forEach((item) => {
-      const a = document.createElement('a');
-      a.href = itemUrl(item);
-      a.target = '_blank';
-      a.rel = 'noopener';
-      a.textContent = itemLabel(item);
-      grid.appendChild(a);
+    grid.className = 'widget-tiles';
+    state.items.slice(0, 10).forEach((item) => {
+      const tile = document.createElement('a');
+      tile.className = 'tile';
+      tile.href = itemUrl(item);
+      tile.target = '_blank';
+      tile.rel = 'noopener';
+
+      const pic = document.createElement('img');
+      pic.className = 'tile-pic';
+      pic.src = 'logo-bear.png';
+      pic.alt = '';
+      tile.appendChild(pic);
+
+      const cap = document.createElement('span');
+      cap.className = 'tile-cap';
+      cap.textContent = itemLabel(item);
+      tile.appendChild(cap);
+
+      grid.appendChild(tile);
     });
     box.appendChild(grid);
   } else {
-    const list = document.createElement('div');
-    list.className = 'widget-rows';
-    state.items.slice(0, MAX_LIST_ITEMS).forEach((item) => {
+    const wrap = document.createElement('div');
+    wrap.className = state.widgetType === 'table' ? 'widget-grid' : 'widget-rows';
+    if (state.widgetType === 'table') {
+      wrap.style.gridTemplateColumns = 'repeat(' + Math.min(state.columns, 3) + ', minmax(0, 1fr))';
+    }
+    const list = state.widgetType === 'table' ? state.items : state.items.slice(0, MAX_LIST_ITEMS);
+    list.forEach((item) => {
       const a = document.createElement('a');
       a.href = itemUrl(item);
       a.target = '_blank';
       a.rel = 'noopener';
-      a.textContent = itemLabel(item);
-      list.appendChild(a);
+      if (useLogo) {
+        const pic = document.createElement('img');
+        pic.className = 'item-pic';
+        pic.src = 'logo-bear.png';
+        pic.alt = '';
+        a.appendChild(pic);
+      }
+      const span = document.createElement('span');
+      span.textContent = itemLabel(item);
+      a.appendChild(span);
+      wrap.appendChild(a);
     });
-    box.appendChild(list);
+    box.appendChild(wrap);
   }
 }
 
@@ -295,6 +369,8 @@ function renderLinks() {
 function renderEditor() {
   $('items').value = itemsToText(state.items);
   $('mode').value = state.searchMode;
+  $('iconmode').value = state.iconMode;
+  $('type').value = state.widgetType;
   $('group').value = state.groupId ? String(state.groupId).replace('-', '') : ($('group').value || '');
 }
 
@@ -448,6 +524,7 @@ function onOpenContext() {
 
 function onReset() {
   state.title = CONFIG.title;
+  state.iconMode = CONFIG.iconMode;
   state.icon = CONFIG.icon;
   state.columns = CONFIG.columns;
   state.widgetType = CONFIG.widgetType;
@@ -576,6 +653,15 @@ document.addEventListener('DOMContentLoaded', () => {
     state.searchMode = $('mode').value;
     renderPreview();
     renderLinks();
+  });
+  $('iconmode').addEventListener('change', () => {
+    state.iconMode = $('iconmode').value;
+    renderPreview();
+    renderLinks();
+  });
+  $('type').addEventListener('change', () => {
+    state.widgetType = $('type').value;
+    renderPreview();
   });
   init();
 });
