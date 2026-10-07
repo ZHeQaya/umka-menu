@@ -6,9 +6,10 @@
    ЧТО МЕНЯТЬ ПЕРЕД ПУБЛИКАЦИЕЙ:
    1. CONFIG.community — короткое имя сообщества (из адреса vk.ru/ymka32020).
    2. CONFIG.title     — заголовок блока.
-   3. CONFIG.items     — пункты меню: text (подпись) + hashtag (без # или с #).
+   3. CONFIG.icon      — иконка перед пунктами (сейчас 🐻❄️ — белый медвежонок).
+   4. CONFIG.items     — пункты меню: text (подпись) + hashtag (без # или с #).
       Ссылка собирается автоматически.
-   4. CONFIG.columns   — число колонок таблицы (2 или 3; максимум 6).
+   5. CONFIG.columns   — число колонок таблицы (2 или 3; максимум 6).
 
    ВАЖНО: виджеты сообществ принимают только внутренние ссылки ВК
    (vk.com / vk.ru / vk.me). Внешние сайты — нельзя.
@@ -17,6 +18,10 @@
 const CONFIG = {
   community: 'ymka32020', // короткое имя вашего сообщества
   title: 'Добрый день, Ульяна!',
+  // Иконка перед каждым пунктом меню. Белый медвежонок — 🐻❄️.
+  // Если на каком-то устройстве она выглядит как «медведь + снежинка» или пустым
+  // квадратиком, поставьте '🐻' или '❄️' — поменяется сразу у всех пунктов.
+  icon: '🐻❄️',
   widgetType: 'table', // 'table' | 'list' | 'compact_list'
   columns: 2,
   // Режим ссылки на поиск:
@@ -29,22 +34,27 @@ const CONFIG = {
   more: '',
   moreUrl: '',
   items: [
-    { text: '🍊 «Умка» — это люди', hashtag: 'УмкаЭтоЛюди' },
-    { text: '🍊 Итоги недели', hashtag: 'УмкаИтогиНедели' },
-    { text: '🍊 Умка готовится к…', hashtag: 'УмкаГотовится' },
-    { text: '🍊 Умка знает правила', hashtag: 'УмкаЗнаетПравила' },
-    { text: '🍊 Умкины истории', hashtag: 'УмкиныИстории' },
-    { text: '🍊 Умка благодарит', hashtag: 'УмкаБлагодарит' },
-    { text: '🍊 Умка в деле', hashtag: 'УмкаВДеле' },
-    { text: '🍊 Умкины будни', hashtag: 'УмкиныБудни' },
-    { text: '🍊 Умка рекомендует', hashtag: 'УмкаРекомендует' },
-    { text: '🍊 Добро начинается с тебя', hashtag: 'ДоброНачинаетсяСТебя' },
+    { text: '«Умка» — это люди', hashtag: 'УмкаЭтоЛюди' },
+    { text: 'Итоги недели', hashtag: 'УмкаИтогиНедели' },
+    { text: 'Умка готовится к…', hashtag: 'УмкаГотовится' },
+    { text: 'Умка знает правила', hashtag: 'УмкаЗнаетПравила' },
+    { text: 'Умкины истории', hashtag: 'УмкиныИстории' },
+    { text: 'Умка благодарит', hashtag: 'УмкаБлагодарит' },
+    { text: 'Умка в деле', hashtag: 'УмкаВДеле' },
+    { text: 'Умкины будни', hashtag: 'УмкиныБудни' },
+    { text: 'Умка рекомендует', hashtag: 'УмкаРекомендует' },
+    { text: 'Добро начинается с тебя', hashtag: 'ДоброНачинаетсяСТебя' },
   ],
 };
 
 const MAX_LIST_ITEMS = 6;
 const MAX_TABLE_COLUMNS = 6;
 const MAX_TABLE_ROWS = 11;
+
+/** Подпись пункта: общая иконка + текст. */
+function itemLabel(item) {
+  return (CONFIG.icon ? CONFIG.icon + ' ' : '') + item.text;
+}
 
 /** Ссылка пункта меню. Если задан url — берём его, иначе строим из хештега. */
 function itemUrl(item, mode) {
@@ -71,14 +81,14 @@ function buildWidgetCode(mode) {
       for (let j = 0; j < columns; j++) {
         const item = rows[i + j];
         // пустые ячейки нужны, чтобы последняя строка не «съезжала»
-        row.push(item ? { text: item.text, url: itemUrl(item, mode) } : { text: '\u00A0' });
+        row.push(item ? { text: itemLabel(item), url: itemUrl(item, mode) } : { text: '\u00A0' });
       }
       body.push(row);
     }
     widget.body = body;
   } else {
     widget.rows = items.slice(0, MAX_LIST_ITEMS).map((item) => ({
-      title: item.text,
+      title: itemLabel(item),
       title_url: itemUrl(item, mode),
     }));
   }
@@ -121,7 +131,7 @@ function renderPreview(mode) {
       a.href = itemUrl(item, mode);
       a.target = '_blank';
       a.rel = 'noopener';
-      a.textContent = item.text;
+      a.textContent = itemLabel(item);
       grid.appendChild(a);
     });
     box.appendChild(grid);
@@ -133,7 +143,7 @@ function renderPreview(mode) {
       a.href = itemUrl(item, mode);
       a.target = '_blank';
       a.rel = 'noopener';
-      a.textContent = item.text;
+      a.textContent = itemLabel(item);
       list.appendChild(a);
     });
     box.appendChild(list);
@@ -164,7 +174,7 @@ function renderLinks(mode) {
     a.href = url;
     a.target = '_blank';
     a.rel = 'noopener';
-    a.textContent = item.text + ' → ' + url;
+    a.textContent = itemLabel(item) + ' → ' + url;
 
     const code = document.createElement('code');
     code.textContent = 'хештег: #' + String(item.hashtag || '').replace(/^#/, '');
