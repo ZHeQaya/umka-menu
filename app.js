@@ -81,13 +81,23 @@ function itemIconId() {
   return appId ? 'app' + appId : null;
 }
 
-/** Ссылка пункта: либо заданная явно, либо поиск по хештегу. */
+/** Ссылка пункта: либо заданная явно, либо поиск по хештегу.
+ *
+ * Формат ссылок важен:
+ *  • поиск по стене сообщества — vk.com/wall-<ID>?q=%23хештег
+ *    (именно этот адрес открывает «поиск по записям»; вариант
+ *     vk.com/<короткое_имя>?q=… фильтр не включает);
+ *  • общий поиск ВК по хештегу — vk.com/feed?section=search&q=%23хештег.
+ */
 function itemUrl(item) {
   if (item.url) return item.url;
   const tag = '%23' + encodeURIComponent(String(item.hashtag || '').replace(/^#/, ''));
   if (state.searchMode === 'hashtag') {
     return 'https://vk.com/feed?section=search&q=' + tag;
   }
+  const gid = String(state.groupId || CONFIG.groupId || '').replace('-', '');
+  if (gid) return 'https://vk.com/wall-' + gid + '?q=' + tag;
+  // запасной вариант, если ID сообщества неизвестен
   return 'https://vk.com/' + CONFIG.community + '?q=' + tag;
 }
 
