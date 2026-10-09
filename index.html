@@ -87,7 +87,7 @@
   </style>
 </head>
 <body>
-  <div class="card">
+  <div class="card" id="top-card">
     <h1 id="page-title">Меню сообщества «Умка»</h1>
     <div class="chip" id="statusline">Загружаю…</div>
   </div>
@@ -95,7 +95,7 @@
   <div class="card alert" id="fatal" hidden></div>
 
   <div id="posts-view" hidden>
-    <div class="card">
+    <div class="card" id="posts-head-card">
       <h2 id="posts-title">Публикации</h2>
       <div class="hint" id="posts-sub"></div>
     </div>
@@ -180,6 +180,6 @@
 
   <!-- ?v= — защита от кеша: при каждой правке файлов увеличивайте номер -->
   <script src="vk-bridge.min.js?v=2"></script>
-  <script src="app.js?v=9"></script>
+  <script src="app.js?v=10"></script>
 </body>
 </html>

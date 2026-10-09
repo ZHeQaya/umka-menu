@@ -19,8 +19,8 @@ const CONFIG = {
   title: 'Добрый день, Ульяна!',
   // Иконка пунктов:
   //  'logo'  — логотип Умки (иконка приложения, icon_id = app<ID>);
-  //  'emoji' — эмодзи медвежонка 🐻 перед названием.
-  iconMode: 'logo',
+  //  'emoji' — эмодзи медвежонка 🐻 перед названием (классический вариант).
+  iconMode: 'emoji',
   icon: '🐻',              // эмодзи для режима 'emoji'
   community: 'ymka32020',  // короткое имя сообщества
   appId: 54809979,         // ID мини-приложения (короткий адрес vk.com/app54809979)
@@ -50,9 +50,9 @@ const CONFIG = {
 const MAX_LIST_ITEMS = 6;
 const MAX_TABLE_COLUMNS = 6;
 const MAX_TABLE_ROWS = 11;
-const STORAGE_PREFIX = 'umka_menu_';
+const STORAGE_PREFIX = 'umka_menu_v2_';
 /** Версия файла — видна в приложении и в журнале. Меняйте при каждой правке. */
-const APP_VERSION = 'v1.09 (09.10.2026)';
+const APP_VERSION = 'v1.10 (09.10.2026)';
 
 /* ------------------------------------------------------------------ */
 /* Логика меню — от здесь и до разделителя ниже нет обращений к DOM.   */
@@ -769,10 +769,31 @@ async function getUserToken() {
   return userToken;
 }
 
+/** Вызов метода API. Сначала пробуем без ключа (платформа может подставить сама) —
+ *  так у подписчика не появится лишний запрос прав. Если не вышло — берём ключ. */
 async function callApi(method, params) {
+  const payload = Object.assign({ v: '5.131' }, params);
+
+  try {
+    const res = await withTimeout(
+      vkBridge.send('VKWebAppCallAPIMethod', { method: method, params: payload }),
+      20000,
+      method
+    );
+    if (res && res.error) {
+      const code = res.error.error_code;
+      // 5 — ошибка авторизации: значит, ключ всё же нужен
+      if (code !== 5) throw new Error(errText(res.error));
+    } else if (res && res.response) {
+      return res.response;
+    }
+  } catch (error) {
+    logPosts(method + ' без ключа не сработал: ' + errText(error), 'muted');
+  }
+
   const token = await getUserToken();
   if (!token) throw new Error('ВК не выдал ключ доступа');
-  const res = await withTimeout(
+  const res2 = await withTimeout(
     vkBridge.send('VKWebAppCallAPIMethod', {
       method: method,
       params: Object.assign({ v: '5.131', access_token: token }, params),
@@ -780,15 +801,35 @@ async function callApi(method, params) {
     25000,
     method
   );
-  if (res && res.error) throw new Error(errText(res.error));
-  return res && res.response;
+  if (res2 && res2.error) throw new Error(errText(res2.error));
+  return res2 && res2.response;
 }
 
-/** Все посты сообщества с хештегом. Сначала wall.search, затем wall.get + фильтр. */
+/** Текст записи вместе с подписями к фото — по нему ищем хештег. */
+function postText(post) {
+  let s = String(post.text || '');
+  (post.attachments || []).forEach((a) => {
+    if (a && a.type === 'photo' && a.photo && a.photo.text) s += '\n' + a.photo.text;
+  });
+  return s.toLowerCase();
+}
+
+/** Есть ли в записи нужный хештег (регистр не важен). */
+function matchesTag(post, tag) {
+  const needle = ('#' + String(tag || '')).toLowerCase();
+  if (needle === '#') return false;
+  return postText(post).indexOf(needle) >= 0;
+}
+
+/** Все посты сообщества с хештегом.
+ *  Фильтр по хештегу применяется ВСЕГДА и на нашей стороне, потому что
+ *  мобильный клиент ВК иногда возвращает из wall.search вообще все записи. */
 async function fetchPosts(tag) {
   const owner = ownerId();
   const query = '#' + tag;
+  const errors = [];
 
+  // 1. Поиск по стене сообщества
   try {
     const res = await callApi('wall.search', {
       owner_id: owner,
@@ -796,16 +837,35 @@ async function fetchPosts(tag) {
       owners_only: 1,
       count: 100,
     });
-    const items = (res && res.items) || [];
-    if (items.length) return items;
+    const all = (res && res.items) || [];
+    const items = all.filter((p) => matchesTag(p, tag));
+    if (items.length) return { items: items, method: 'wall.search' };
+    if (all.length) errors.push('wall.search вернул ' + all.length + ' записей, но без этого хештега');
   } catch (error) {
-    logPosts('wall.search: ' + errText(error) + ' — пробую запасной способ', 'muted');
+    errors.push('wall.search: ' + errText(error));
   }
 
-  const res = await callApi('wall.get', { owner_id: owner, count: 100, filter: 'owner' });
-  const items = (res && res.items) || [];
-  const needle = query.toLowerCase();
-  return items.filter((p) => String(p.text || '').toLowerCase().indexOf(needle) >= 0);
+  // 2. Последние записи стены + фильтр на нашей стороне
+  try {
+    const res = await callApi('wall.get', { owner_id: owner, count: 100, filter: 'owner' });
+    const items = ((res && res.items) || []).filter((p) => matchesTag(p, tag));
+    if (items.length) return { items: items, method: 'wall.get' };
+    errors.push('wall.get: подходящих записей нет');
+  } catch (error) {
+    errors.push('wall.get: ' + errText(error));
+  }
+
+  // 3. Общий поиск ВК по хештегу
+  try {
+    const res = await callApi('newsfeed.search', { q: query, count: 100 });
+    const items = ((res && res.items) || []).filter((p) => matchesTag(p, tag));
+    if (items.length) return { items: items, method: 'newsfeed.search' };
+    errors.push('newsfeed.search: подходящих записей нет');
+  } catch (error) {
+    errors.push('newsfeed.search: ' + errText(error));
+  }
+
+  return { items: [], method: '—', errors: errors };
 }
 
 function formatDate(ts) {
@@ -874,7 +934,7 @@ function renderPosts(items) {
 
       const link = document.createElement('a');
       link.className = 'post-link';
-      link.href = 'https://vk.com/wall' + ownerId() + '_' + post.id;
+      link.href = 'https://vk.com/wall' + (post.owner_id != null ? post.owner_id : ownerId()) + '_' + post.id;
       link.target = '_blank';
       link.rel = 'noopener';
       link.textContent = 'Открыть запись';
@@ -908,10 +968,15 @@ async function loadPosts(tag) {
   box.innerHTML = '<div class="hint">Загружаю записи…</div>';
   $('posts-log').textContent = '';
   try {
-    const items = await fetchPosts(tag);
-    renderPosts(items);
+    const result = await fetchPosts(tag);
+    renderPosts(result.items);
     $('posts-sub').textContent =
-      'Хештег #' + tag + ' · найдено записей: ' + items.length + ' · показаны все, без фильтра по датам.';
+      'Хештег #' + tag + ' · найдено записей: ' + result.items.length +
+      ' · без фильтра по датам' + (result.method !== '—' ? ' · источник: ' + result.method : '');
+    (result.errors || []).forEach((e) => logPosts(e, 'muted'));
+    if (!result.items.length && !(result.errors || []).length) {
+      logPosts('ВК не вернул ни одной записи с этим хештегом.', 'muted');
+    }
   } catch (error) {
     box.innerHTML = '';
     logPosts('Не удалось загрузить: ' + errText(error), 'err');
@@ -933,7 +998,16 @@ function showPostsView(tag) {
     $('posts-sub').textContent = 'Выберите раздел — покажу все записи с его хештегом.';
     renderCategoryButtons();
   }
-  $('btn-admin').hidden = !(state.role === 'admin' || state.role === 'editor' || state.role === 'moder' || !state.role);
+  $('btn-admin').hidden = !isAdminUser();
+  applyChromeVisibility();
+}
+
+/** Обычным подписчикам верхние блоки не нужны — оставляем только список. */
+function applyChromeVisibility() {
+  const admin = isAdminUser();
+  const inPostsView = !$('posts-view').hidden;
+  if ($('top-card')) $('top-card').hidden = inPostsView && !admin;
+  if ($('posts-head-card')) $('posts-head-card').hidden = inPostsView && !admin;
 }
 
 function showAdminView() {
@@ -941,6 +1015,15 @@ function showAdminView() {
   $('admin-view').hidden = false;
   $('page-title').textContent = 'Меню сообщества «Умка»';
   state.tag = null;
+  if ($('top-card')) $('top-card').hidden = false;
+  if ($('posts-head-card')) $('posts-head-card').hidden = false;
+}
+
+/** Администратор/редактор сообщества? Если роль не определена — считаем, что да
+ *  (иначе админ без контекста сообщества не увидит настроек). */
+function isAdminUser() {
+  if (!state.role) return true;
+  return state.role === 'admin' || state.role === 'editor' || state.role === 'moder';
 }
 
 function openVkSearch() {
@@ -994,14 +1077,15 @@ async function init() {
 
   // Определяем, что показать: страницу постов по хештегу или настройки меню.
   const tag = getTagFromLaunch();
-  const isAdmin = state.role === 'admin' || state.role === 'editor' || state.role === 'moder';
+  const isAdmin = isAdminUser();
   if (tag) {
     showPostsView(tag);
-  } else if (isAdmin || !state.role) {
+  } else if (isAdmin) {
     showAdminView();
   } else {
     showPostsView(null);
   }
+  applyChromeVisibility();
 }
 
 document.addEventListener('DOMContentLoaded', () => {
