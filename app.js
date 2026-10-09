@@ -51,6 +51,8 @@ const MAX_LIST_ITEMS = 6;
 const MAX_TABLE_COLUMNS = 6;
 const MAX_TABLE_ROWS = 11;
 const STORAGE_PREFIX = 'umka_menu_';
+/** Версия файла — видна в приложении и в журнале. Меняйте при каждой правке. */
+const APP_VERSION = 'v1.09 (09.10.2026)';
 
 /* ------------------------------------------------------------------ */
 /* Логика меню — от здесь и до разделителя ниже нет обращений к DOM.   */
@@ -179,7 +181,9 @@ function itemUrl(item) {
     if (appId) {
       // h= — ASCII-код хештега. Никакой кириллицы: ВК её портит,
       // а ссылка в виджете ограничена 200 символами.
-      return 'https://vk.com/app' + appId + (gid ? '_-' + gid : '') + '#h=' + tagToHex(rawTag);
+      const appUrl = 'https://vk.com/app' + appId + (gid ? '_-' + gid : '') + '#h=' + tagToHex(rawTag);
+      if (appUrl.length <= 200) return appUrl;
+      // если вдруг длиннее лимита ВК — отдаём штатный поиск по записям
     }
     return 'https://vk.com/wall-' + gid + '?q=' + tag;
   }
@@ -378,6 +382,7 @@ function bridgeUsable() {
 
 function renderStatus() {
   const parts = [];
+  parts.push(APP_VERSION);
   parts.push(state.bridgeOk ? 'VK Bridge: ок' : 'VK Bridge: нет связи');
   if (state.appId) parts.push('приложение ' + state.appId);
   if (state.groupId) parts.push('сообщество ' + state.groupId);
@@ -967,7 +972,7 @@ async function init() {
     await withTimeout(vkBridge.send('VKWebAppInit'), embedded ? 8000 : 3000, 'VKWebAppInit');
     state.bridgeOk = true;
     embedded = true;
-    log('VK Bridge инициализирован.', 'ok');
+    log('VK Bridge инициализирован. Версия приложения: ' + APP_VERSION, 'ok');
   } catch (error) {
     log('VKWebAppInit не ответил: ' + errText(error), 'err');
     if (!embedded) {
