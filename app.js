@@ -52,7 +52,7 @@ const MAX_TABLE_COLUMNS = 6;
 const MAX_TABLE_ROWS = 11;
 const STORAGE_PREFIX = 'umka_menu_v2_';
 /** Версия файла — видна в приложении и в журнале. Меняйте при каждой правке. */
-const APP_VERSION = 'v1.11 (09.10.2026)';
+const APP_VERSION = 'v1.12 (09.10.2026)';
 
 /* ------------------------------------------------------------------ */
 /* Логика меню — от здесь и до разделителя ниже нет обращений к DOM.   */
@@ -717,23 +717,16 @@ async function detectLaunchParams() {
 
 /* ---------------------- страница «все посты по хештегу» ------------------ */
 
-/** Хештег, переданный виджетом в ссылке вида vk.com/app…_-…#h=<код>&tag=…
+/** Разбирает строку после «#» (например «h=0414…») и достаёт хештег.
  *  Приоритет — ASCII-код `h`: кириллицу в URL ВК перекодирует в «кракозябры». */
-function getTagFromLaunch() {
-  let raw = '';
-  try {
-    const sp = new URLSearchParams(location.search);
-    raw = sp.get('hash') || '';
-  } catch (error) {
-    raw = '';
-  }
-  if (!raw && location.hash) raw = location.hash.replace(/^#/, '');
-  if (!raw) return null;
+function tagFromFragment(raw) {
+  const s = String(raw || '').replace(/^#/, '');
+  if (!s) return null;
 
   let hex = '';
   let literal = '';
   try {
-    const inner = new URLSearchParams(raw);
+    const inner = new URLSearchParams(s);
     hex = inner.get('h') || '';
     literal = inner.get('tag') || '';
   } catch (error) {
@@ -741,8 +734,8 @@ function getTagFromLaunch() {
     literal = '';
   }
   if (!hex && !literal) {
-    if (/^h=/.test(raw)) hex = raw.slice(2);
-    else if (/^tag=/.test(raw)) literal = raw.slice(4);
+    if (/^h=/.test(s)) hex = s.slice(2);
+    else if (/^tag=/.test(s)) literal = s.slice(4);
   }
 
   const fromHex = hexToTag(hex);
@@ -750,6 +743,47 @@ function getTagFromLaunch() {
 
   const fixed = repairTag(literal).replace(/^#/, '').trim();
   return fixed || null;
+}
+
+/** Хештег при запуске приложения: либо из параметра hash, либо из адреса. */
+function getTagFromLaunch() {
+  let raw = '';
+  try {
+    raw = new URLSearchParams(location.search).get('hash') || '';
+  } catch (error) {
+    raw = '';
+  }
+  if (!raw && location.hash) raw = location.hash;
+  return tagFromFragment(raw);
+}
+
+/** ВК может не перезагружать приложение, а прислать новую ссылку событием
+ *  (например, при восстановлении из кеша на Android/iOS). Следим за этим. */
+function watchFragmentChanges() {
+  if (typeof vkBridge === 'undefined' || typeof vkBridge.subscribe !== 'function') return;
+
+  vkBridge.subscribe((event) => {
+    const detail = event && event.detail;
+    if (!detail || !detail.type) return;
+
+    if (detail.type === 'VKWebAppChangeFragment' || detail.type === 'VKWebAppLocationChanged') {
+      const loc = (detail.data && detail.data.location) || '';
+      const tag = tagFromFragment(loc);
+      log('ВК сменил ссылку: ' + (tag ? '#' + tag : '(пусто)'), 'muted');
+      if (tag) {
+        showPostsView(tag);           // всегда перечитываем записи
+      } else {
+        showPostsView(null);
+      }
+      return;
+    }
+
+    // приложение восстановили из кеша — перечитываем адрес
+    if (detail.type === 'VKWebAppViewRestore') {
+      const tag = getTagFromLaunch();
+      if (tag) showPostsView(tag);
+    }
+  });
 }
 
 function ownerId() {
@@ -1120,6 +1154,7 @@ async function init() {
     showPostsView(null);
   }
   applyChromeVisibility();
+  watchFragmentChanges();
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -1151,6 +1186,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
   if ($('btn-vk-search')) $('btn-vk-search').addEventListener('click', openVkSearch);
+  // Возврат в приложение: перечитываем адрес и обновляем записи
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden || $('posts-view').hidden) return;
+    const tag = getTagFromLaunch() || state.tag;
+    if (tag) showPostsView(tag);
+  });
   if ($('btn-details')) {
     $('btn-details').addEventListener('click', () => {
       const box = $('posts-log');
