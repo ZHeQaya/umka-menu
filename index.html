@@ -91,7 +91,11 @@
   </style>
 </head>
 <body>
-  <div class="card" id="top-card">
+  <div class="card" id="loading-card">
+    <div class="hint">Загружаю…</div>
+  </div>
+
+  <div class="card" id="top-card" hidden>
     <h1 id="page-title">Меню сообщества «Умка»</h1>
     <div class="chip" id="statusline">Загружаю…</div>
   </div>
@@ -115,7 +119,7 @@
     </div>
   </div>
 
-  <div id="admin-view">
+  <div id="admin-view" hidden>
   <div class="card">
     <h2>Пункты меню</h2>
     <div class="hint">
@@ -125,8 +129,12 @@
     <textarea id="items" spellcheck="false"></textarea>
     <label for="iconmode">Иконка пунктов</label>
     <select id="iconmode">
+      <option value="dot">Синий кружок 🔵 (нейтральный)</option>
+      <option value="diamond">Синий ромбик 🔹 (мельче)</option>
+      <option value="circle">Белый кружок ⚪</option>
+      <option value="bear">Эмодзи мишки 🐻</option>
       <option value="logo">Логотип Умки (иконка приложения)</option>
-      <option value="emoji">Эмодзи мишки 🐻 перед названием</option>
+      <option value="none">Без иконки</option>
     </select>
     <label for="type">Вид блока в сообществе</label>
     <select id="type">
@@ -185,6 +193,6 @@
 
   <!-- ?v= — защита от кеша: при каждой правке файлов увеличивайте номер -->
   <script src="vk-bridge.min.js?v=2"></script>
-  <script src="app.js?v=12"></script>
+  <script src="app.js?v=13"></script>
 </body>
 </html>

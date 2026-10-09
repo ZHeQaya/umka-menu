@@ -19,9 +19,9 @@ const CONFIG = {
   title: 'Добрый день, Ульяна!',
   // Иконка пунктов:
   //  'logo'  — логотип Умки (иконка приложения, icon_id = app<ID>);
-  //  'emoji' — эмодзи медвежонка 🐻 перед названием (классический вариант).
+  //  'emoji' — эмодзи перед названием. По умолчанию нейтральный синий кружок.
   iconMode: 'emoji',
-  icon: '🐻',              // эмодзи для режима 'emoji'
+  icon: '🔵',
   community: 'ymka32020',  // короткое имя сообщества
   appId: 54809979,         // ID мини-приложения (короткий адрес vk.com/app54809979)
   groupId: 212278594,      // ID сообщества Умка (vk.com/club212278594)
@@ -52,7 +52,28 @@ const MAX_TABLE_COLUMNS = 6;
 const MAX_TABLE_ROWS = 11;
 const STORAGE_PREFIX = 'umka_menu_v2_';
 /** Версия файла — видна в приложении и в журнале. Меняйте при каждой правке. */
-const APP_VERSION = 'v1.12 (09.10.2026)';
+const APP_VERSION = 'v1.13 (09.10.2026)';
+
+/** Варианты иконки пунктов: значение списка → (режим, эмодзи). */
+const ICON_OPTIONS = {
+  dot: { iconMode: 'emoji', icon: '🔵' },
+  diamond: { iconMode: 'emoji', icon: '🔹' },
+  circle: { iconMode: 'emoji', icon: '⚪' },
+  bear: { iconMode: 'emoji', icon: '🐻' },
+  logo: { iconMode: 'logo', icon: '' },
+  none: { iconMode: 'emoji', icon: '' },
+};
+
+/** Какое значение списка соответствует текущей настройке. */
+function currentIconOption() {
+  if (state.iconMode === 'logo') return 'logo';
+  const keys = Object.keys(ICON_OPTIONS);
+  for (let i = 0; i < keys.length; i++) {
+    const opt = ICON_OPTIONS[keys[i]];
+    if (opt.iconMode === state.iconMode && opt.icon === state.icon) return keys[i];
+  }
+  return state.icon ? 'dot' : 'none';
+}
 
 /* ------------------------------------------------------------------ */
 /* Логика меню — от здесь и до разделителя ниже нет обращений к DOM.   */
@@ -484,7 +505,7 @@ function renderLinks() {
 function renderEditor() {
   $('items').value = itemsToText(state.items);
   $('mode').value = state.searchMode;
-  $('iconmode').value = state.iconMode;
+  $('iconmode').value = currentIconOption();
   $('type').value = state.widgetType;
   $('group').value = state.groupId ? String(state.groupId).replace('-', '') : ($('group').value || '');
 }
@@ -758,7 +779,60 @@ function getTagFromLaunch() {
 }
 
 /** ВК может не перезагружать приложение, а прислать новую ссылку событием
- *  (например, при восстановлении из кеша на Android/iOS). Следим за этим. */
+ *  (например, при восстановлении из кеша на Android/iOS). Следим за этим
+ *  несколькими способами, потому что на разных версиях ВК ведут себя по-разному. */
+let lastFragment = null;
+
+function currentFragment() {
+  try {
+    const h = new URLSearchParams(location.search).get('hash');
+    if (h) return h;
+  } catch (error) {
+    /* игнорируем */
+  }
+  return location.hash ? location.hash.replace(/^#/, '') : '';
+}
+
+function applyFragment(raw) {
+  if (raw === lastFragment) return;
+  lastFragment = raw;
+  const tag = tagFromFragment(raw);
+  log('Ссылка изменилась: ' + (tag ? '#' + tag : '(пусто)'), 'muted');
+  if (tag) {
+    if (state.tag === tag && !$('posts-view').hidden) loadPosts(tag);
+    else showPostsView(tag);
+  } else {
+    showPostsView(null);
+  }
+}
+
+function startTagWatch() {
+  lastFragment = currentFragment();
+
+  window.addEventListener('hashchange', () => {
+    applyFragment(currentFragment());
+  });
+
+  // 1. Дешёвая проверка адреса
+  setInterval(() => {
+    if ($('posts-view').hidden) return;
+    const raw = currentFragment();
+    if (raw !== lastFragment) applyFragment(raw);
+  }, 2500);
+
+  // 2. Иногда платформа меняет только параметры запуска — спрашиваем их напрямую
+  setInterval(async () => {
+    if ($('posts-view').hidden || !bridgeUsable()) return;
+    try {
+      const params = await vkBridge.send('VKWebAppGetLaunchParams');
+      const raw = (params && params.hash) || '';
+      if (raw && raw !== lastFragment) applyFragment(raw);
+    } catch (error) {
+      /* молча */
+    }
+  }, 10000);
+}
+
 function watchFragmentChanges() {
   if (typeof vkBridge === 'undefined' || typeof vkBridge.subscribe !== 'function') return;
 
@@ -766,19 +840,15 @@ function watchFragmentChanges() {
     const detail = event && event.detail;
     if (!detail || !detail.type) return;
 
+    // все события ВК пишем в журнал — это помогает разбираться с проблемами
+    log('событие ВК: ' + detail.type, 'muted');
+
     if (detail.type === 'VKWebAppChangeFragment' || detail.type === 'VKWebAppLocationChanged') {
       const loc = (detail.data && detail.data.location) || '';
-      const tag = tagFromFragment(loc);
-      log('ВК сменил ссылку: ' + (tag ? '#' + tag : '(пусто)'), 'muted');
-      if (tag) {
-        showPostsView(tag);           // всегда перечитываем записи
-      } else {
-        showPostsView(null);
-      }
+      applyFragment(loc);
       return;
     }
 
-    // приложение восстановили из кеша — перечитываем адрес
     if (detail.type === 'VKWebAppViewRestore') {
       const tag = getTagFromLaunch();
       if (tag) showPostsView(tag);
@@ -1052,9 +1122,15 @@ async function loadPosts(tag) {
   }
 }
 
+/** Прячем заглушку «Загружаю…» — вызывается, когда экран уже выбран. */
+function finishLoading() {
+  if ($('loading-card')) $('loading-card').hidden = true;
+}
+
 function showPostsView(tag) {
   $('posts-view').hidden = false;
   $('admin-view').hidden = true;
+  finishLoading();
   $('page-title').textContent = 'Умка · публикации';
   state.tag = tag || null;
   if (tag) {
@@ -1081,6 +1157,7 @@ function applyChromeVisibility() {
 function showAdminView() {
   $('posts-view').hidden = true;
   $('admin-view').hidden = false;
+  finishLoading();
   $('page-title').textContent = 'Меню сообщества «Умка»';
   state.tag = null;
   if ($('top-card')) $('top-card').hidden = false;
@@ -1113,6 +1190,7 @@ async function init() {
         'Пока его нет, кнопки работать не будут, но предпросмотр меню ниже доступен.'
     );
     log('vk-bridge.min.js не загружен.', 'err');
+    showAdminView();
     return;
   }
 
@@ -1134,6 +1212,7 @@ async function init() {
           '<b>vk.com/app54809979_-212278594</b>.'
       );
       log('Вне ВК: кнопки установки неактивны, это нормально.', 'muted');
+      showAdminView();
       return;
     }
   }
@@ -1155,6 +1234,7 @@ async function init() {
   }
   applyChromeVisibility();
   watchFragmentChanges();
+  startTagWatch();
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -1171,7 +1251,9 @@ document.addEventListener('DOMContentLoaded', () => {
     renderLinks();
   });
   $('iconmode').addEventListener('change', () => {
-    state.iconMode = $('iconmode').value;
+    const opt = ICON_OPTIONS[$('iconmode').value] || ICON_OPTIONS.dot;
+    state.iconMode = opt.iconMode;
+    state.icon = opt.icon;
     renderPreview();
     renderLinks();
   });
