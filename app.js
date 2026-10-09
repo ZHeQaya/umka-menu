@@ -52,7 +52,7 @@ const MAX_TABLE_COLUMNS = 6;
 const MAX_TABLE_ROWS = 11;
 const STORAGE_PREFIX = 'umka_menu_v2_';
 /** Версия файла — видна в приложении и в журнале. Меняйте при каждой правке. */
-const APP_VERSION = 'v1.10 (09.10.2026)';
+const APP_VERSION = 'v1.11 (09.10.2026)';
 
 /* ------------------------------------------------------------------ */
 /* Логика меню — от здесь и до разделителя ниже нет обращений к DOM.   */
@@ -343,9 +343,14 @@ function applyConfig(data) {
 
 const $ = (id) => document.getElementById(id);
 
+/** Короткий и понятный текст ошибки: у VK Bridge ошибка лежит внутри error_data. */
 function errText(error) {
   if (!error) return 'неизвестная ошибка';
   if (typeof error === 'string') return error;
+  const d = error.error_data || error;
+  if (d && (d.error_code !== undefined || d.error_reason)) {
+    return 'код ' + d.error_code + (d.error_reason ? ': ' + d.error_reason : '');
+  }
   return error.error_msg || error.error_description || error.message || JSON.stringify(error);
 }
 
@@ -823,49 +828,40 @@ function matchesTag(post, tag) {
 
 /** Все посты сообщества с хештегом.
  *  Фильтр по хештегу применяется ВСЕГДА и на нашей стороне, потому что
- *  мобильный клиент ВК иногда возвращает из wall.search вообще все записи. */
+ *  мобильный клиент ВК иногда возвращает из wall.search вообще все записи.
+ *  Возвращает список, источник и подробности для журнала. */
 async function fetchPosts(tag) {
   const owner = ownerId();
   const query = '#' + tag;
-  const errors = [];
+  const info = [];   // подробности для журнала
+  const failed = []; // методы, которые не сработали
 
-  // 1. Поиск по стене сообщества
-  try {
-    const res = await callApi('wall.search', {
-      owner_id: owner,
-      query: query,
-      owners_only: 1,
-      count: 100,
-    });
-    const all = (res && res.items) || [];
-    const items = all.filter((p) => matchesTag(p, tag));
-    if (items.length) return { items: items, method: 'wall.search' };
-    if (all.length) errors.push('wall.search вернул ' + all.length + ' записей, но без этого хештега');
-  } catch (error) {
-    errors.push('wall.search: ' + errText(error));
+  async function attempt(method, params) {
+    try {
+      const res = await callApi(method, params);
+      const all = (res && res.items) || [];
+      const items = all.filter((p) => matchesTag(p, tag));
+      info.push(method + ': получено записей ' + all.length + ', из них с хештегом ' + items.length);
+      return items;
+    } catch (error) {
+      info.push(method + ': не удалось — ' + errText(error));
+      failed.push(method);
+      return [];
+    }
   }
 
-  // 2. Последние записи стены + фильтр на нашей стороне
-  try {
-    const res = await callApi('wall.get', { owner_id: owner, count: 100, filter: 'owner' });
-    const items = ((res && res.items) || []).filter((p) => matchesTag(p, tag));
-    if (items.length) return { items: items, method: 'wall.get' };
-    errors.push('wall.get: подходящих записей нет');
-  } catch (error) {
-    errors.push('wall.get: ' + errText(error));
-  }
+  let items = await attempt('wall.search', {
+    owner_id: owner, query: query, owners_only: 1, count: 100,
+  });
+  if (items.length) return { items: items, method: 'wall.search', info: info, failed: failed };
 
-  // 3. Общий поиск ВК по хештегу
-  try {
-    const res = await callApi('newsfeed.search', { q: query, count: 100 });
-    const items = ((res && res.items) || []).filter((p) => matchesTag(p, tag));
-    if (items.length) return { items: items, method: 'newsfeed.search' };
-    errors.push('newsfeed.search: подходящих записей нет');
-  } catch (error) {
-    errors.push('newsfeed.search: ' + errText(error));
-  }
+  items = await attempt('wall.get', { owner_id: owner, count: 100, filter: 'owner' });
+  if (items.length) return { items: items, method: 'wall.get', info: info, failed: failed };
 
-  return { items: [], method: '—', errors: errors };
+  items = await attempt('newsfeed.search', { q: query, count: 100 });
+  if (items.length) return { items: items, method: 'newsfeed.search', info: info, failed: failed };
+
+  return { items: [], method: '—', info: info, failed: failed };
 }
 
 function formatDate(ts) {
@@ -895,13 +891,16 @@ function logPosts(message, kind) {
   box.appendChild(line);
 }
 
-function renderPosts(items) {
+function renderPosts(items, tag) {
   const box = $('posts-list');
   box.innerHTML = '';
   if (!items.length) {
-    box.innerHTML =
-      '<div class="hint">Записей с этим хештегом не нашлось. ' +
-      'Проверьте, что хештег стоит в тексте самой записи (не в подписи к фото и не в комментарии).</div>';
+    const empty = document.createElement('div');
+    empty.className = 'hint';
+    empty.textContent = tag
+      ? 'Записей с хештегом #' + tag + ' не нашлось.'
+      : 'Записей не нашлось.';
+    box.appendChild(empty);
     return;
   }
   items
@@ -921,6 +920,18 @@ function renderPosts(items) {
         text.className = 'post-text';
         text.textContent = post.text;
         div.appendChild(text);
+
+        // как в ленте: длинный текст показываем сокращённо
+        if (post.text.length > 240) {
+          const more = document.createElement('button');
+          more.className = 'post-more';
+          more.textContent = 'Показать полностью';
+          more.addEventListener('click', () => {
+            const opened = text.classList.toggle('open');
+            more.textContent = opened ? 'Свернуть' : 'Показать полностью';
+          });
+          div.appendChild(more);
+        }
       }
 
       const pic = postPhoto(post);
@@ -964,23 +975,46 @@ function renderCategoryButtons() {
 
 async function loadPosts(tag) {
   const box = $('posts-list');
+  const logBox = $('posts-log');
   state.tag = tag || null;
+  logBox.textContent = '';
+  logBox.hidden = true;
+
+  if (!tag) {
+    renderCategoryButtons();
+    return;
+  }
+
   box.innerHTML = '<div class="hint">Загружаю записи…</div>';
-  $('posts-log').textContent = '';
   try {
     const result = await fetchPosts(tag);
-    renderPosts(result.items);
-    $('posts-sub').textContent =
-      'Хештег #' + tag + ' · найдено записей: ' + result.items.length +
-      ' · без фильтра по датам' + (result.method !== '—' ? ' · источник: ' + result.method : '');
-    (result.errors || []).forEach((e) => logPosts(e, 'muted'));
-    if (!result.items.length && !(result.errors || []).length) {
-      logPosts('ВК не вернул ни одной записи с этим хештегом.', 'muted');
+    renderPosts(result.items, tag);
+
+    if (result.items.length) {
+      $('posts-sub').textContent =
+        'Всего записей: ' + result.items.length + ' · показаны все, без фильтра по датам';
+    } else {
+      $('posts-sub').textContent = '';
+      if (result.failed.length === 3) {
+        // ни один способ не сработал — говорим понятно, без технических деталей
+        box.innerHTML = '';
+        const d = document.createElement('div');
+        d.className = 'hint';
+        d.textContent = 'ВК не отдал записи. Нажмите «Обновить» или «Поиск ВК».';
+        box.appendChild(d);
+      }
     }
+
+    // Подробности — только в журнал, который открывается кнопкой «Подробнее».
+    logPosts('Хештег из ссылки: #' + tag, 'muted');
+    logPosts('Контекст: ' + (state.groupId || '—') + ', роль: ' + (state.role || '—') + ', платформа: ' + (state.platform || '—'), 'muted');
+    result.info.forEach((line) => logPosts(line, 'muted'));
+    if (result.items.length) logPosts('Источник данных: ' + result.method, 'ok');
   } catch (error) {
     box.innerHTML = '';
     logPosts('Не удалось загрузить: ' + errText(error), 'err');
-    $('posts-sub').textContent = 'Можно открыть обычный поиск ВК кнопкой ниже.';
+    $('posts-sub').textContent = '';
+    logBox.hidden = false;
   }
 }
 
@@ -1117,6 +1151,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
   if ($('btn-vk-search')) $('btn-vk-search').addEventListener('click', openVkSearch);
+  if ($('btn-details')) {
+    $('btn-details').addEventListener('click', () => {
+      const box = $('posts-log');
+      box.hidden = !box.hidden;
+    });
+  }
   if ($('btn-admin')) $('btn-admin').addEventListener('click', showAdminView);
   if ($('btn-preview-user')) {
     $('btn-preview-user').addEventListener('click', () => showPostsView(state.tag || null));

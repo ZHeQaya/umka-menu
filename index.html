@@ -80,7 +80,11 @@
     .post { padding: 12px 0; border-bottom: 1px solid var(--line); }
     .post:last-child { border-bottom: 0; }
     .post-date { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-    .post-text { font-size: 15px; white-space: pre-wrap; word-break: break-word; margin-bottom: 8px; }
+    .post-text { font-size: 15px; white-space: pre-wrap; word-break: break-word; margin-bottom: 6px;
+      display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+    .post-text.open { display: block; -webkit-line-clamp: unset; overflow: visible; }
+    .post-more { background: none; border: 0; padding: 0; margin: 0 0 8px; color: var(--accent);
+      font: inherit; font-size: 13px; cursor: pointer; }
     .post-photo { width: 100%; border-radius: 10px; margin-bottom: 8px; display: block; }
     .post-link { font-size: 13px; color: var(--accent); text-decoration: none; }
     .post-tag { color: var(--accent); }
@@ -101,10 +105,11 @@
     </div>
     <div class="card">
       <div id="posts-list"></div>
-      <div class="log" id="posts-log"></div>
+      <div class="log" id="posts-log" hidden></div>
       <div>
         <button id="btn-refresh">Обновить</button>
         <button id="btn-vk-search" class="secondary">Поиск ВК</button>
+        <button id="btn-details" class="secondary">Подробнее</button>
         <button id="btn-admin" class="secondary" hidden>Настройки меню</button>
       </div>
     </div>
@@ -180,6 +185,6 @@
 
   <!-- ?v= — защита от кеша: при каждой правке файлов увеличивайте номер -->
   <script src="vk-bridge.min.js?v=2"></script>
-  <script src="app.js?v=10"></script>
+  <script src="app.js?v=11"></script>
 </body>
 </html>
