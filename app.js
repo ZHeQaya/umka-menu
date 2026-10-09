@@ -86,23 +86,31 @@ function itemIconId() {
   return appId ? 'app' + appId : null;
 }
 
-/** Хештег → ASCII-код (по 5 hex-цифр на символ). Кириллицу в URL не передаём,
- *  иначе ВК перекодирует её и получаются «кракозябры» вида РЈРјРєР°… */
+/** Хештег → ASCII-код (по 4 hex-цифры на символ). Кириллицу в URL не передаём,
+ *  иначе ВК перекодирует её и получаются «кракозябры» вида РЈРјРєР°…
+ *  Код короткий: ВК разрешает в виджете ссылки не длиннее 200 символов. */
 function tagToHex(tag) {
-  return Array.from(String(tag || '')).map(function (ch) {
-    return ch.codePointAt(0).toString(16).padStart(5, '0');
-  }).join('');
+  const s = String(tag || '');
+  let out = '';
+  for (let i = 0; i < s.length; i++) {
+    out += s.charCodeAt(i).toString(16).padStart(4, '0');
+  }
+  return out;
 }
 
-/** ASCII-код → хештег. Возвращает null, если строка не похожа на код. */
+/** ASCII-код → хештег. Понимает и новый код (4 цифры), и старый (5 цифр). */
 function hexToTag(hex) {
   const s = String(hex || '');
-  if (!s || s.length % 5 !== 0 || !/^[0-9a-f]+$/i.test(s)) return null;
+  if (!s || !/^[0-9a-f]+$/i.test(s)) return null;
+  let width;
+  if (s.length % 4 === 0) width = 4;
+  else if (s.length % 5 === 0) width = 5;
+  else return null;
   let out = '';
-  for (let i = 0; i < s.length; i += 5) {
-    const code = parseInt(s.substr(i, 5), 16);
+  for (let i = 0; i < s.length; i += width) {
+    const code = parseInt(s.substr(i, width), 16);
     if (!isFinite(code) || code < 32) return null;
-    out += String.fromCodePoint(code);
+    out += String.fromCharCode(code);
   }
   return out;
 }
@@ -169,11 +177,9 @@ function itemUrl(item) {
     const appId = state.appId || CONFIG.appId;
     const gid = String(state.groupId || CONFIG.groupId || '').replace('-', '');
     if (appId) {
-      // h= — код хештега (только латиница и цифры), tag= — для читаемости
-      return (
-        'https://vk.com/app' + appId + (gid ? '_-' + gid : '') +
-        '#h=' + tagToHex(rawTag) + '&tag=' + encodeURIComponent(rawTag)
-      );
+      // h= — ASCII-код хештега. Никакой кириллицы: ВК её портит,
+      // а ссылка в виджете ограничена 200 символами.
+      return 'https://vk.com/app' + appId + (gid ? '_-' + gid : '') + '#h=' + tagToHex(rawTag);
     }
     return 'https://vk.com/wall-' + gid + '?q=' + tag;
   }
@@ -284,6 +290,9 @@ function validate() {
     const url = itemUrl(item);
     if (!/^https:\/\/(vk\.com|vk\.ru|vk\.me)\//.test(url)) {
       problems.push('Ссылка пункта должна быть внутренней ВК: ' + item.text);
+    }
+    if (url.length > 200) {
+      problems.push('Ссылка пункта «' + item.text + '» длиннее 200 символов (' + url.length + ') — ВК её не примет.');
     }
     if (itemLabel(item).length > 100) problems.push('Слишком длинное название: ' + item.text);
   });
