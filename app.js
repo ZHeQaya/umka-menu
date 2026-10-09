@@ -52,7 +52,7 @@ const MAX_TABLE_COLUMNS = 6;
 const MAX_TABLE_ROWS = 11;
 const STORAGE_PREFIX = 'umka_menu_v2_';
 /** Версия файла — видна в приложении и в журнале. Меняйте при каждой правке. */
-const APP_VERSION = 'v1.15 (10.10.2026)';
+const APP_VERSION = 'v1.16 (10.10.2026)';
 
 /** Варианты иконки пунктов: значение списка → (режим, эмодзи). */
 const ICON_OPTIONS = {
@@ -778,15 +778,18 @@ function getTagFromLaunch() {
   return tagFromFragment(raw);
 }
 
-/** ВК может не перезагружать приложение, а прислать новую ссылку событием
- *  (например, при восстановлении из кеша на Android/iOS). Следим за этим
- *  несколькими способами, потому что на разных версиях ВК ведут себя по-разному. */
-let lastFragment = null;
+/** Слежение за сменой хештега.
+ *
+ *  Как это работает в ВК: новый хештег платформа присылает СОБЫТИЕМ
+ *  (VKWebAppChangeFragment), а адрес страницы при этом часто остаётся старым.
+ *  Поэтому источник истины — события; проверки адреса включаются только если
+ *  событий не было вообще, иначе старый адрес откатывал бы список назад. */
+let launchFragment = '';
+let liveFragment = '';
+let eventsSeen = false;
 
-/** Текущий фрагмент ссылки. ВАЖНО: сначала берём location.hash — именно его ВК
- *  обновляет при переходе. Параметр hash из строки запуска остаётся старым,
- *  и если читать его первым, приложение будет возвращаться к прошлому хештегу. */
-function currentFragment() {
+/** Что лежало в ссылке на момент запуска (это значение не обновляется). */
+function readLaunchFragment() {
   const fromHash = location.hash ? location.hash.replace(/^#/, '') : '';
   if (fromHash) return fromHash;
   try {
@@ -796,43 +799,56 @@ function currentFragment() {
   }
 }
 
-function applyFragment(raw) {
-  if (raw === lastFragment) return;
+/** Новый фрагмент из надёжного источника. */
+function setLiveFragment(raw, source) {
+  if (!raw || raw === liveFragment) return;
   const tag = tagFromFragment(raw);
 
-  // Тот же хештег — ничего не перезагружаем (иначе список мигает)
+  // Тот же хештег — не дёргаем список (иначе он мигает)
   if (tag && tag === state.tag && !$('posts-view').hidden) {
-    lastFragment = raw;
+    liveFragment = raw;
     return;
   }
 
-  lastFragment = raw;
-  log('Ссылка изменилась: ' + (tag ? '#' + tag : '(пусто)'), 'muted');
+  liveFragment = raw;
+  log('Ссылка изменилась (' + source + '): ' + (tag ? '#' + tag : '(пусто)'), 'muted');
   if (tag) showPostsView(tag);
   else showPostsView(null);
 }
 
+/** Проверка адреса. Работает только пока ВК не присылал событий:
+ *  после события адрес считается устаревшим. */
+function checkUrlFragment(source) {
+  if (eventsSeen) return;
+  const raw = location.hash ? location.hash.replace(/^#/, '') : '';
+  if (!raw || raw === launchFragment) return;
+  setLiveFragment(raw, source);
+}
+
 function startTagWatch() {
-  lastFragment = currentFragment();
+  window.addEventListener('hashchange', () => checkUrlFragment('адрес'));
 
-  window.addEventListener('hashchange', () => {
-    applyFragment(currentFragment());
-  });
-
-  // Проверка адреса (location.hash меняется платформой при переходе)
   setInterval(() => {
     if ($('posts-view').hidden) return;
-    const raw = currentFragment();
-    if (raw && raw !== lastFragment) applyFragment(raw);
+    checkUrlFragment('адрес');
   }, 1500);
 
-  // Возврат в приложение: ВК меняет ссылку не сразу, поэтому смотрим несколько раз
+  // ВК может обновить только параметры запуска — спрашиваем их, пока нет событий
+  setInterval(async () => {
+    if (eventsSeen || $('posts-view').hidden || !bridgeUsable()) return;
+    try {
+      const params = await vkBridge.send('VKWebAppGetLaunchParams');
+      const raw = (params && params.hash) || '';
+      if (raw && raw !== launchFragment) setLiveFragment(raw, 'параметры запуска');
+    } catch (error) {
+      /* молча */
+    }
+  }, 5000);
+
+  // Возврат в приложение: смотрим адрес несколько раз (если события не приходят)
   const recheck = () => {
     [250, 1000, 2500].forEach((delay) => {
-      setTimeout(() => {
-        const raw = currentFragment();
-        if (raw && raw !== lastFragment) applyFragment(raw);
-      }, delay);
+      setTimeout(() => checkUrlFragment('возврат в приложение'), delay);
     });
   };
   document.addEventListener('visibilitychange', () => {
@@ -844,7 +860,12 @@ function startTagWatch() {
 
 /** Перечитать ссылку и показать то, что в ней. Используется кнопкой «Обновить». */
 function refreshFromLink() {
-  const tag = tagFromFragment(currentFragment()) || getTagFromLaunch() || state.tag;
+  const fromUrl = location.hash ? location.hash.replace(/^#/, '') : '';
+  const tag =
+    tagFromFragment(liveFragment) ||
+    (!eventsSeen ? tagFromFragment(fromUrl) : null) ||
+    getTagFromLaunch() ||
+    state.tag;
   if (tag) showPostsView(tag);
   else showPostsView(null);
 }
@@ -860,13 +881,14 @@ function watchFragmentChanges() {
     log('событие ВК: ' + detail.type, 'muted');
 
     if (detail.type === 'VKWebAppChangeFragment' || detail.type === 'VKWebAppLocationChanged') {
+      eventsSeen = true; // адресу страницы больше не доверяем
       const loc = (detail.data && detail.data.location) || '';
-      applyFragment(loc);
+      setLiveFragment(loc, 'событие ВК');
       return;
     }
 
     if (detail.type === 'VKWebAppViewRestore') {
-      const tag = getTagFromLaunch();
+      const tag = tagFromFragment(liveFragment) || getTagFromLaunch();
       if (tag) showPostsView(tag);
     }
   });
@@ -1230,6 +1252,8 @@ async function init() {
   renderAll();
 
   // Определяем, что показать: страницу постов по хештегу или настройки меню.
+  launchFragment = readLaunchFragment();
+  liveFragment = launchFragment;
   const tag = getTagFromLaunch();
   const isAdmin = isAdminUser();
   if (tag) {
