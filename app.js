@@ -52,7 +52,7 @@ const MAX_TABLE_COLUMNS = 6;
 const MAX_TABLE_ROWS = 11;
 const STORAGE_PREFIX = 'umka_menu_v2_';
 /** Версия файла — видна в приложении и в журнале. Меняйте при каждой правке. */
-const APP_VERSION = 'v1.14 (10.10.2026)';
+const APP_VERSION = 'v1.15 (10.10.2026)';
 
 /** Варианты иконки пунктов: значение списка → (режим, эмодзи). */
 const ICON_OPTIONS = {
@@ -783,27 +783,33 @@ function getTagFromLaunch() {
  *  несколькими способами, потому что на разных версиях ВК ведут себя по-разному. */
 let lastFragment = null;
 
+/** Текущий фрагмент ссылки. ВАЖНО: сначала берём location.hash — именно его ВК
+ *  обновляет при переходе. Параметр hash из строки запуска остаётся старым,
+ *  и если читать его первым, приложение будет возвращаться к прошлому хештегу. */
 function currentFragment() {
+  const fromHash = location.hash ? location.hash.replace(/^#/, '') : '';
+  if (fromHash) return fromHash;
   try {
-    const h = new URLSearchParams(location.search).get('hash');
-    if (h) return h;
+    return new URLSearchParams(location.search).get('hash') || '';
   } catch (error) {
-    /* игнорируем */
+    return '';
   }
-  return location.hash ? location.hash.replace(/^#/, '') : '';
 }
 
 function applyFragment(raw) {
   if (raw === lastFragment) return;
-  lastFragment = raw;
   const tag = tagFromFragment(raw);
-  log('Ссылка изменилась: ' + (tag ? '#' + tag : '(пусто)'), 'muted');
-  if (tag) {
-    if (state.tag === tag && !$('posts-view').hidden) loadPosts(tag);
-    else showPostsView(tag);
-  } else {
-    showPostsView(null);
+
+  // Тот же хештег — ничего не перезагружаем (иначе список мигает)
+  if (tag && tag === state.tag && !$('posts-view').hidden) {
+    lastFragment = raw;
+    return;
   }
+
+  lastFragment = raw;
+  log('Ссылка изменилась: ' + (tag ? '#' + tag : '(пусто)'), 'muted');
+  if (tag) showPostsView(tag);
+  else showPostsView(null);
 }
 
 function startTagWatch() {
@@ -813,24 +819,12 @@ function startTagWatch() {
     applyFragment(currentFragment());
   });
 
-  // Дешёвая проверка адреса
+  // Проверка адреса (location.hash меняется платформой при переходе)
   setInterval(() => {
     if ($('posts-view').hidden) return;
     const raw = currentFragment();
-    if (raw !== lastFragment) applyFragment(raw);
+    if (raw && raw !== lastFragment) applyFragment(raw);
   }, 1500);
-
-  // Иногда платформа меняет только параметры запуска — спрашиваем их напрямую
-  setInterval(async () => {
-    if ($('posts-view').hidden || !bridgeUsable()) return;
-    try {
-      const params = await vkBridge.send('VKWebAppGetLaunchParams');
-      const raw = (params && params.hash) || '';
-      if (raw && raw !== lastFragment) applyFragment(raw);
-    } catch (error) {
-      /* молча */
-    }
-  }, 5000);
 
   // Возврат в приложение: ВК меняет ссылку не сразу, поэтому смотрим несколько раз
   const recheck = () => {
@@ -1081,6 +1075,9 @@ function renderCategoryButtons() {
   box.appendChild(wrap);
 }
 
+/** Счётчик запросов: чтобы медленный старый ответ не затёр новый список. */
+let loadSeq = 0;
+
 async function loadPosts(tag) {
   const box = $('posts-list');
   const logBox = $('posts-log');
@@ -1094,8 +1091,14 @@ async function loadPosts(tag) {
   }
 
   box.innerHTML = '<div class="hint">Загружаю записи…</div>';
+  const requestId = ++loadSeq;
   try {
     const result = await fetchPosts(tag);
+    // Пока грузилось, могли открыть другой хештег — устаревший ответ не показываем
+    if (requestId !== loadSeq) {
+      logPosts('Устаревший ответ для #' + tag + ' пропущен', 'muted');
+      return;
+    }
     renderPosts(result.items, tag);
 
     if (result.items.length) {
