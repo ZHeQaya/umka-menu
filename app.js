@@ -28,7 +28,11 @@ const CONFIG = {
   columns: 2,              // колонок в таблице-виджете (2 или 3, максимум 6)
   // 'tiles' — плитки с логотипом (3–10 шт.), 'table' — сетка, 'list' — список (до 6)
   widgetType: 'tiles',
-  searchMode: 'community', // 'community' — поиск в сообществе, 'hashtag' — общий поиск ВК
+  // Куда ведут пункты:
+  //  'app'     — страница приложения со ВСЕМИ постами по хештегу (без фильтра по датам);
+  //  'wall'    — штатный поиск по записям сообщества (vk.com/wall-<ID>?q=…);
+  //  'hashtag' — общий поиск ВК по хештегу (vk.com/feed?section=search&q=…).
+  searchMode: 'app',
   items: [
     { text: '«Умка» — это люди', hashtag: 'УмкаЭтоЛюди' },
     { text: 'Итоги недели', hashtag: 'УмкаИтогиНедели' },
@@ -61,6 +65,7 @@ const state = {
   widgetType: CONFIG.widgetType,
   searchMode: CONFIG.searchMode,
   items: CONFIG.items.map((i) => Object.assign({}, i)),
+  tag: null,
   groupId: CONFIG.groupId ? String(CONFIG.groupId) : null,
   role: null,
   platform: null,
@@ -81,18 +86,29 @@ function itemIconId() {
   return appId ? 'app' + appId : null;
 }
 
-/** Ссылка пункта: либо заданная явно, либо поиск по хештегу.
+/** Ссылка пункта: либо заданная явно, либо страница приложения/поиск по хештегу.
  *
  * Формат ссылок важен:
- *  • поиск по стене сообщества — vk.com/wall-<ID>?q=%23хештег
- *    (именно этот адрес открывает «поиск по записям»; вариант
- *     vk.com/<короткое_имя>?q=… фильтр не включает);
- *  • общий поиск ВК по хештегу — vk.com/feed?section=search&q=%23хештег.
+ *  • 'app'     — vk.com/app<ID>_-<GROUP>#tag=хештег — открывает наше приложение,
+ *                которое через API показывает ВСЕ посты с хештегом, без фильтра по датам;
+ *  • 'wall'    — vk.com/wall-<ID>?q=%23хештег (штатный поиск по записям сообщества);
+ *  • 'hashtag' — vk.com/feed?section=search&q=%23хештег (общий поиск ВК).
  */
 function itemUrl(item) {
   if (item.url) return item.url;
-  const tag = '%23' + encodeURIComponent(String(item.hashtag || '').replace(/^#/, ''));
-  if (state.searchMode === 'hashtag') {
+  const rawTag = String(item.hashtag || '').replace(/^#/, '').trim();
+  const tag = '%23' + encodeURIComponent(rawTag);
+  const mode = state.searchMode === 'community' ? 'wall' : state.searchMode;
+
+  if (mode === 'app') {
+    const appId = state.appId || CONFIG.appId;
+    const gid = String(state.groupId || CONFIG.groupId || '').replace('-', '');
+    if (appId) {
+      return 'https://vk.com/app' + appId + (gid ? '_-' + gid : '') + '#tag=' + encodeURIComponent(rawTag);
+    }
+    return 'https://vk.com/wall-' + gid + '?q=' + tag;
+  }
+  if (mode === 'hashtag') {
     return 'https://vk.com/feed?section=search&q=' + tag;
   }
   const gid = String(state.groupId || CONFIG.groupId || '').replace('-', '');
@@ -232,7 +248,8 @@ function applyConfig(data) {
   if (data.widgetType === 'table' || data.widgetType === 'list' || data.widgetType === 'tiles') {
     state.widgetType = data.widgetType;
   }
-  if (data.searchMode === 'community' || data.searchMode === 'hashtag') state.searchMode = data.searchMode;
+  if (data.searchMode === 'community') state.searchMode = 'wall';
+  else if (['app', 'wall', 'hashtag'].indexOf(data.searchMode) >= 0) state.searchMode = data.searchMode;
   if (Array.isArray(data.items) && data.items.length) {
     state.items = data.items
       .filter((i) => i && i.text)
@@ -610,6 +627,236 @@ async function detectLaunchParams() {
   }
 }
 
+/* ---------------------- страница «все посты по хештегу» ------------------ */
+
+/** Хештег, переданный виджетом в ссылке вида vk.com/app…_-…​#tag=УмкаВДеле. */
+function getTagFromLaunch() {
+  let raw = '';
+  try {
+    const sp = new URLSearchParams(location.search);
+    raw = sp.get('hash') || '';
+  } catch (error) {
+    raw = '';
+  }
+  if (!raw && location.hash) raw = location.hash.replace(/^#/, '');
+  if (!raw) return null;
+  let tag = '';
+  try {
+    const inner = new URLSearchParams(raw);
+    tag = inner.get('tag') || '';
+  } catch (error) {
+    tag = '';
+  }
+  if (!tag && /^tag=/.test(raw)) tag = decodeURIComponent(raw.slice(4));
+  tag = String(tag).replace(/^#/, '').trim();
+  return tag || null;
+}
+
+function ownerId() {
+  const gid = String(state.groupId || CONFIG.groupId || '').replace('-', '');
+  return gid ? -Math.abs(Number(gid)) : null;
+}
+
+let userToken = null;
+
+/** Ключ доступа пользователя — нужен для вызовов API через VK Bridge. */
+async function getUserToken() {
+  if (userToken) return userToken;
+  const res = await withTimeout(
+    vkBridge.send('VKWebAppGetAuthToken', {
+      app_id: Number(state.appId || CONFIG.appId),
+      scope: '',
+    }),
+    25000,
+    'VKWebAppGetAuthToken'
+  );
+  userToken = (res && res.access_token) || null;
+  return userToken;
+}
+
+async function callApi(method, params) {
+  const token = await getUserToken();
+  if (!token) throw new Error('ВК не выдал ключ доступа');
+  const res = await withTimeout(
+    vkBridge.send('VKWebAppCallAPIMethod', {
+      method: method,
+      params: Object.assign({ v: '5.131', access_token: token }, params),
+    }),
+    25000,
+    method
+  );
+  if (res && res.error) throw new Error(errText(res.error));
+  return res && res.response;
+}
+
+/** Все посты сообщества с хештегом. Сначала wall.search, затем wall.get + фильтр. */
+async function fetchPosts(tag) {
+  const owner = ownerId();
+  const query = '#' + tag;
+
+  try {
+    const res = await callApi('wall.search', {
+      owner_id: owner,
+      query: query,
+      owners_only: 1,
+      count: 100,
+    });
+    const items = (res && res.items) || [];
+    if (items.length) return items;
+  } catch (error) {
+    logPosts('wall.search: ' + errText(error) + ' — пробую запасной способ', 'muted');
+  }
+
+  const res = await callApi('wall.get', { owner_id: owner, count: 100, filter: 'owner' });
+  const items = (res && res.items) || [];
+  const needle = query.toLowerCase();
+  return items.filter((p) => String(p.text || '').toLowerCase().indexOf(needle) >= 0);
+}
+
+function formatDate(ts) {
+  try {
+    return new Date(Number(ts) * 1000).toLocaleString('ru-RU', {
+      day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
+    });
+  } catch (error) {
+    return '';
+  }
+}
+
+function postPhoto(post) {
+  const att = (post.attachments || []).find((a) => a && a.type === 'photo' && a.photo);
+  if (!att) return null;
+  const sizes = att.photo.sizes || [];
+  if (!sizes.length) return null;
+  return sizes[sizes.length - 1].url || null;
+}
+
+function logPosts(message, kind) {
+  const box = $('posts-log');
+  if (!box) return;
+  const line = document.createElement('div');
+  if (kind) line.className = kind;
+  line.textContent = message;
+  box.appendChild(line);
+}
+
+function renderPosts(items) {
+  const box = $('posts-list');
+  box.innerHTML = '';
+  if (!items.length) {
+    box.innerHTML =
+      '<div class="hint">Записей с этим хештегом не нашлось. ' +
+      'Проверьте, что хештег стоит в тексте самой записи (не в подписи к фото и не в комментарии).</div>';
+    return;
+  }
+  items
+    .slice()
+    .sort((a, b) => Number(b.date) - Number(a.date))
+    .forEach((post) => {
+      const div = document.createElement('div');
+      div.className = 'post';
+
+      const date = document.createElement('div');
+      date.className = 'post-date';
+      date.textContent = formatDate(post.date);
+      div.appendChild(date);
+
+      if (post.text) {
+        const text = document.createElement('div');
+        text.className = 'post-text';
+        text.textContent = post.text;
+        div.appendChild(text);
+      }
+
+      const pic = postPhoto(post);
+      if (pic) {
+        const img = document.createElement('img');
+        img.className = 'post-photo';
+        img.src = pic;
+        img.loading = 'lazy';
+        div.appendChild(img);
+      }
+
+      const link = document.createElement('a');
+      link.className = 'post-link';
+      link.href = 'https://vk.com/wall' + ownerId() + '_' + post.id;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.textContent = 'Открыть запись';
+      div.appendChild(link);
+
+      box.appendChild(div);
+    });
+}
+
+function renderCategoryButtons() {
+  const box = $('posts-list');
+  box.innerHTML = '';
+  const wrap = document.createElement('div');
+  wrap.className = 'cats';
+  state.items.forEach((item) => {
+    const btn = document.createElement('button');
+    btn.className = 'secondary';
+    btn.textContent = item.text;
+    btn.addEventListener('click', () => {
+      $('posts-title').textContent = '#' + String(item.hashtag || '').replace(/^#/, '');
+      loadPosts(String(item.hashtag || '').replace(/^#/, ''));
+    });
+    wrap.appendChild(btn);
+  });
+  box.appendChild(wrap);
+}
+
+async function loadPosts(tag) {
+  const box = $('posts-list');
+  state.tag = tag || null;
+  box.innerHTML = '<div class="hint">Загружаю записи…</div>';
+  $('posts-log').textContent = '';
+  try {
+    const items = await fetchPosts(tag);
+    renderPosts(items);
+    $('posts-sub').textContent =
+      'Хештег #' + tag + ' · найдено записей: ' + items.length + ' · показаны все, без фильтра по датам.';
+  } catch (error) {
+    box.innerHTML = '';
+    logPosts('Не удалось загрузить: ' + errText(error), 'err');
+    $('posts-sub').textContent = 'Можно открыть обычный поиск ВК кнопкой ниже.';
+  }
+}
+
+function showPostsView(tag) {
+  $('posts-view').hidden = false;
+  $('admin-view').hidden = true;
+  $('page-title').textContent = 'Умка · публикации';
+  state.tag = tag || null;
+  if (tag) {
+    $('posts-title').textContent = '#' + tag;
+    $('posts-sub').textContent = 'Все записи сообщества с этим хештегом.';
+    loadPosts(tag);
+  } else {
+    $('posts-title').textContent = 'Разделы';
+    $('posts-sub').textContent = 'Выберите раздел — покажу все записи с его хештегом.';
+    renderCategoryButtons();
+  }
+  $('btn-admin').hidden = !(state.role === 'admin' || state.role === 'editor' || state.role === 'moder' || !state.role);
+}
+
+function showAdminView() {
+  $('posts-view').hidden = true;
+  $('admin-view').hidden = false;
+  $('page-title').textContent = 'Меню сообщества «Умка»';
+  state.tag = null;
+}
+
+function openVkSearch() {
+  const tag = state.tag || (state.items[0] && String(state.items[0].hashtag || '').replace(/^#/, '')) || '';
+  const gid = String(state.groupId || CONFIG.groupId || '').replace('-', '');
+  const url = gid
+    ? 'https://vk.com/wall-' + gid + '?q=%23' + encodeURIComponent(tag)
+    : 'https://vk.com/feed?section=search&q=%23' + encodeURIComponent(tag);
+  window.open(url, '_blank');
+}
+
 async function init() {
   renderAll(); // интерфейс показываем сразу, не дожидаясь ответов ВК
 
@@ -649,6 +896,17 @@ async function init() {
   renderAll();
   await loadFromStorage();
   renderAll();
+
+  // Определяем, что показать: страницу постов по хештегу или настройки меню.
+  const tag = getTagFromLaunch();
+  const isAdmin = state.role === 'admin' || state.role === 'editor' || state.role === 'moder';
+  if (tag) {
+    showPostsView(tag);
+  } else if (isAdmin || !state.role) {
+    showAdminView();
+  } else {
+    showPostsView(null);
+  }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -673,5 +931,16 @@ document.addEventListener('DOMContentLoaded', () => {
     state.widgetType = $('type').value;
     renderPreview();
   });
+  if ($('btn-refresh')) {
+    $('btn-refresh').addEventListener('click', () => {
+      if (state.tag) loadPosts(state.tag);
+      else showPostsView(null);
+    });
+  }
+  if ($('btn-vk-search')) $('btn-vk-search').addEventListener('click', openVkSearch);
+  if ($('btn-admin')) $('btn-admin').addEventListener('click', showAdminView);
+  if ($('btn-preview-user')) {
+    $('btn-preview-user').addEventListener('click', () => showPostsView(state.tag || null));
+  }
   init();
 });
