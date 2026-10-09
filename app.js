@@ -86,10 +86,75 @@ function itemIconId() {
   return appId ? 'app' + appId : null;
 }
 
+/** Хештег → ASCII-код (по 5 hex-цифр на символ). Кириллицу в URL не передаём,
+ *  иначе ВК перекодирует её и получаются «кракозябры» вида РЈРјРєР°… */
+function tagToHex(tag) {
+  return Array.from(String(tag || '')).map(function (ch) {
+    return ch.codePointAt(0).toString(16).padStart(5, '0');
+  }).join('');
+}
+
+/** ASCII-код → хештег. Возвращает null, если строка не похожа на код. */
+function hexToTag(hex) {
+  const s = String(hex || '');
+  if (!s || s.length % 5 !== 0 || !/^[0-9a-f]+$/i.test(s)) return null;
+  let out = '';
+  for (let i = 0; i < s.length; i += 5) {
+    const code = parseInt(s.substr(i, 5), 16);
+    if (!isFinite(code) || code < 32) return null;
+    out += String.fromCodePoint(code);
+  }
+  return out;
+}
+
+/* --- починка «кракозябр» на случай старых ссылок с кириллицей в URL ------- */
+const MOJIBAKE_RE = /[ЂЃ‚ѓ„…†‡€‰Љ‹ЊЌЋЏђ‘’“”•–—™љ›њќћџЎўЈ¤Ґ¦§Ё©Є«¬®Ї°±Ііґµ¶·ё№є»јЅѕї¿]/;
+
+let cp1251Reverse = null;
+
+function buildCp1251Reverse() {
+  if (cp1251Reverse) return cp1251Reverse;
+  cp1251Reverse = {};
+  try {
+    const dec = new TextDecoder('windows-1251');
+    for (let b = 128; b < 256; b++) {
+      const ch = dec.decode(new Uint8Array([b]));
+      if (ch && ch.length === 1 && ch !== '\uFFFD') cp1251Reverse[ch] = b;
+    }
+  } catch (error) {
+    cp1251Reverse = {};
+  }
+  return cp1251Reverse;
+}
+
+/** Если ВК перекодировал кириллицу в cp1251 — возвращаем читаемый хештег. */
+function repairTag(raw) {
+  const s = String(raw || '').trim();
+  if (!s || !MOJIBAKE_RE.test(s)) return s;
+  const map = buildCp1251Reverse();
+  const bytes = [];
+  for (const ch of s) {
+    const code = ch.codePointAt(0);
+    if (code < 128) {
+      bytes.push(code);
+      continue;
+    }
+    const b = map[ch];
+    if (b === undefined) return s;
+    bytes.push(b);
+  }
+  try {
+    const fixed = new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(bytes));
+    return fixed || s;
+  } catch (error) {
+    return s;
+  }
+}
+
 /** Ссылка пункта: либо заданная явно, либо страница приложения/поиск по хештегу.
  *
  * Формат ссылок важен:
- *  • 'app'     — vk.com/app<ID>_-<GROUP>#tag=хештег — открывает наше приложение,
+ *  • 'app'     — vk.com/app<ID>_-<GROUP>#h=<ASCII-код хештега> — открывает наше приложение,
  *                которое через API показывает ВСЕ посты с хештегом, без фильтра по датам;
  *  • 'wall'    — vk.com/wall-<ID>?q=%23хештег (штатный поиск по записям сообщества);
  *  • 'hashtag' — vk.com/feed?section=search&q=%23хештег (общий поиск ВК).
@@ -104,7 +169,11 @@ function itemUrl(item) {
     const appId = state.appId || CONFIG.appId;
     const gid = String(state.groupId || CONFIG.groupId || '').replace('-', '');
     if (appId) {
-      return 'https://vk.com/app' + appId + (gid ? '_-' + gid : '') + '#tag=' + encodeURIComponent(rawTag);
+      // h= — код хештега (только латиница и цифры), tag= — для читаемости
+      return (
+        'https://vk.com/app' + appId + (gid ? '_-' + gid : '') +
+        '#h=' + tagToHex(rawTag) + '&tag=' + encodeURIComponent(rawTag)
+      );
     }
     return 'https://vk.com/wall-' + gid + '?q=' + tag;
   }
@@ -629,7 +698,8 @@ async function detectLaunchParams() {
 
 /* ---------------------- страница «все посты по хештегу» ------------------ */
 
-/** Хештег, переданный виджетом в ссылке вида vk.com/app…_-…​#tag=УмкаВДеле. */
+/** Хештег, переданный виджетом в ссылке вида vk.com/app…_-…#h=<код>&tag=…
+ *  Приоритет — ASCII-код `h`: кириллицу в URL ВК перекодирует в «кракозябры». */
 function getTagFromLaunch() {
   let raw = '';
   try {
@@ -640,16 +710,27 @@ function getTagFromLaunch() {
   }
   if (!raw && location.hash) raw = location.hash.replace(/^#/, '');
   if (!raw) return null;
-  let tag = '';
+
+  let hex = '';
+  let literal = '';
   try {
     const inner = new URLSearchParams(raw);
-    tag = inner.get('tag') || '';
+    hex = inner.get('h') || '';
+    literal = inner.get('tag') || '';
   } catch (error) {
-    tag = '';
+    hex = '';
+    literal = '';
   }
-  if (!tag && /^tag=/.test(raw)) tag = decodeURIComponent(raw.slice(4));
-  tag = String(tag).replace(/^#/, '').trim();
-  return tag || null;
+  if (!hex && !literal) {
+    if (/^h=/.test(raw)) hex = raw.slice(2);
+    else if (/^tag=/.test(raw)) literal = raw.slice(4);
+  }
+
+  const fromHex = hexToTag(hex);
+  if (fromHex) return fromHex;
+
+  const fixed = repairTag(literal).replace(/^#/, '').trim();
+  return fixed || null;
 }
 
 function ownerId() {
