@@ -52,7 +52,7 @@ const MAX_TABLE_COLUMNS = 6;
 const MAX_TABLE_ROWS = 11;
 const STORAGE_PREFIX = 'umka_menu_v2_';
 /** Версия файла — видна в приложении и в журнале. Меняйте при каждой правке. */
-const APP_VERSION = 'v1.13 (09.10.2026)';
+const APP_VERSION = 'v1.14 (10.10.2026)';
 
 /** Варианты иконки пунктов: значение списка → (режим, эмодзи). */
 const ICON_OPTIONS = {
@@ -813,14 +813,14 @@ function startTagWatch() {
     applyFragment(currentFragment());
   });
 
-  // 1. Дешёвая проверка адреса
+  // Дешёвая проверка адреса
   setInterval(() => {
     if ($('posts-view').hidden) return;
     const raw = currentFragment();
     if (raw !== lastFragment) applyFragment(raw);
-  }, 2500);
+  }, 1500);
 
-  // 2. Иногда платформа меняет только параметры запуска — спрашиваем их напрямую
+  // Иногда платформа меняет только параметры запуска — спрашиваем их напрямую
   setInterval(async () => {
     if ($('posts-view').hidden || !bridgeUsable()) return;
     try {
@@ -830,7 +830,29 @@ function startTagWatch() {
     } catch (error) {
       /* молча */
     }
-  }, 10000);
+  }, 5000);
+
+  // Возврат в приложение: ВК меняет ссылку не сразу, поэтому смотрим несколько раз
+  const recheck = () => {
+    [250, 1000, 2500].forEach((delay) => {
+      setTimeout(() => {
+        const raw = currentFragment();
+        if (raw && raw !== lastFragment) applyFragment(raw);
+      }, delay);
+    });
+  };
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) recheck();
+  });
+  window.addEventListener('focus', recheck);
+  window.addEventListener('pageshow', recheck);
+}
+
+/** Перечитать ссылку и показать то, что в ней. Используется кнопкой «Обновить». */
+function refreshFromLink() {
+  const tag = tagFromFragment(currentFragment()) || getTagFromLaunch() || state.tag;
+  if (tag) showPostsView(tag);
+  else showPostsView(null);
 }
 
 function watchFragmentChanges() {
@@ -878,31 +900,12 @@ async function getUserToken() {
   return userToken;
 }
 
-/** Вызов метода API. Сначала пробуем без ключа (платформа может подставить сама) —
- *  так у подписчика не появится лишний запрос прав. Если не вышло — берём ключ. */
+/** Вызов метода API. Платформа требует ключ доступа, поэтому берём его сразу
+ *  (со пустым scope — без лишнего запроса прав). */
 async function callApi(method, params) {
-  const payload = Object.assign({ v: '5.131' }, params);
-
-  try {
-    const res = await withTimeout(
-      vkBridge.send('VKWebAppCallAPIMethod', { method: method, params: payload }),
-      20000,
-      method
-    );
-    if (res && res.error) {
-      const code = res.error.error_code;
-      // 5 — ошибка авторизации: значит, ключ всё же нужен
-      if (code !== 5) throw new Error(errText(res.error));
-    } else if (res && res.response) {
-      return res.response;
-    }
-  } catch (error) {
-    logPosts(method + ' без ключа не сработал: ' + errText(error), 'muted');
-  }
-
   const token = await getUserToken();
   if (!token) throw new Error('ВК не выдал ключ доступа');
-  const res2 = await withTimeout(
+  const res = await withTimeout(
     vkBridge.send('VKWebAppCallAPIMethod', {
       method: method,
       params: Object.assign({ v: '5.131', access_token: token }, params),
@@ -910,8 +913,8 @@ async function callApi(method, params) {
     25000,
     method
   );
-  if (res2 && res2.error) throw new Error(errText(res2.error));
-  return res2 && res2.response;
+  if (res && res.error) throw new Error(errText(res.error));
+  return res && res.response;
 }
 
 /** Текст записи вместе с подписями к фото — по нему ищем хештег. */
@@ -991,7 +994,8 @@ function logPosts(message, kind) {
   if (!box) return;
   const line = document.createElement('div');
   if (kind) line.className = kind;
-  line.textContent = message;
+  const time = new Date().toLocaleTimeString('ru-RU');
+  line.textContent = '[' + time + '] ' + message;
   box.appendChild(line);
 }
 
@@ -1262,18 +1266,9 @@ document.addEventListener('DOMContentLoaded', () => {
     renderPreview();
   });
   if ($('btn-refresh')) {
-    $('btn-refresh').addEventListener('click', () => {
-      if (state.tag) loadPosts(state.tag);
-      else showPostsView(null);
-    });
+    $('btn-refresh').addEventListener('click', refreshFromLink);
   }
   if ($('btn-vk-search')) $('btn-vk-search').addEventListener('click', openVkSearch);
-  // Возврат в приложение: перечитываем адрес и обновляем записи
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden || $('posts-view').hidden) return;
-    const tag = getTagFromLaunch() || state.tag;
-    if (tag) showPostsView(tag);
-  });
   if ($('btn-details')) {
     $('btn-details').addEventListener('click', () => {
       const box = $('posts-log');
