@@ -59,7 +59,13 @@ const CONFIG = {
       key: 'problem',
       text: 'Сообщить о проблеме',
       emoji: '⚠️',
-      url: 'https://pos.gosuslugi.ru/form/?opaId=21227859&utm_source=vk&utm_medium=32&utm_campaign=1204200000366',
+      // opaId — идентификатор ЛКО ПОС нашей организации (детский сад № 3 «Умка»).
+      // Формат и параметры — по инструкции ПОС:
+      //   ?opaId=<ID ЛКО ПОС>&utm_source=vk&utm_medium=<ОКАТО региона>&utm_campaign=<ОГРН>
+      //   utm_medium=32 — Кемеровская область, utm_campaign — ОГРН сада.
+      // Старый opaId=21227859 в ПОС не существует: форма отвечала
+      // «Ошибка 404. Организации с таким номером не существует».
+      url: 'https://pos.gosuslugi.ru/form/?opaId=304074&utm_source=vk&utm_medium=32&utm_campaign=1204200000366',
       external: true,
       descr: 'Сообщить о проблеме через портал «Решаем вместе»',
       image: 'https://sun9-8.userapi.com/s/v1/s2/hUOyU22fyRril9MRk5XoMiI228pCH4ycjv5Z26iGqJTzg-bo2GydXU2ZyDKdJVKx8ARQRjLdKc2hkMVLcJpHARrZyHw8.jpg',
@@ -94,7 +100,7 @@ const MAX_TABLE_COLUMNS = 6;
 const MAX_TABLE_ROWS = 11;
 const STORAGE_PREFIX = 'umka_menu_v2_';
 /** Версия файла — видна в приложении и в журнале. Меняйте при каждой правке. */
-const APP_VERSION = 'v1.21 (18.10.2026)';
+const APP_VERSION = 'v1.22 (18.10.2026)';
 
 /** Варианты иконки пунктов: значение списка → (режим, эмодзи). */
 const ICON_OPTIONS = {
