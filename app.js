@@ -90,7 +90,7 @@ const MAX_TABLE_COLUMNS = 6;
 const MAX_TABLE_ROWS = 11;
 const STORAGE_PREFIX = 'umka_menu_v2_';
 /** Версия файла — видна в приложении и в журнале. Меняйте при каждой правке. */
-const APP_VERSION = 'v1.19 (18.10.2026)';
+const APP_VERSION = 'v1.20 (18.10.2026)';
 
 /** Варианты иконки пунктов: значение списка → (режим, эмодзи). */
 const ICON_OPTIONS = {
@@ -1218,21 +1218,43 @@ function renderPosts(items, tag) {
     });
 }
 
-/** Открыть внешний сайт. Пробуем несколько способов: в вебвью ВК
- *  срабатывает не каждый, поэтому пробуем по очереди. */
+/** Открыть внешний сайт напрямую (без away.php — он показывает страницу ВК
+ *  в отдельном окне). VK откроет ссылку в своём встроенном браузере. */
 function openExternal(url) {
   try {
-    const win = window.open(url, '_blank');
-    if (win) return true;
-  } catch (error) {
-    /* пробуем дальше */
-  }
-  try {
-    window.location.replace('https://vk.com/away.php?to=' + encodeURIComponent(url));
+    window.open(url, '_blank');
     return true;
   } catch (error) {
     return false;
   }
+}
+
+/** Открыть быстрый пункт: внутренние — через VK Bridge (в основном окне ВК),
+ *  внешние — напрямую на сайт. */
+function openQuick(q) {
+  if (!q) return;
+
+  if (!q.external && bridgeUsable()) {
+    // Запись в кружок — другое мини-приложение ВК
+    if (q.key === 'enroll') {
+      vkBridge
+        .send('VKWebAppOpenApp', {
+          app_id: 8181405,
+          location: 'module=education&step=ChoosingKid&groupId=public212278594',
+        })
+        .catch(() => window.open(q.url, '_blank'));
+      return;
+    }
+    // Кибермошенничество — запись сообщества
+    if (q.key === 'cyber') {
+      vkBridge
+        .send('VKWebAppOpenWallPost', { owner_id: -212278594, post_id: 7332 })
+        .catch(() => window.open(q.url, '_blank'));
+      return;
+    }
+  }
+
+  window.open(q.url, '_blank');
 }
 
 function renderCategoryButtons() {
@@ -1268,8 +1290,7 @@ function renderCategoryButtons() {
       cap.textContent = q.text;
       btn.appendChild(cap);
       btn.addEventListener('click', () => {
-        if (q.external) openExternal(q.url);
-        else window.open(q.url, '_blank');
+        openQuick(q);
       });
       quick.appendChild(btn);
     });
@@ -1317,9 +1338,6 @@ function showService(key) {
   const box = $('posts-list');
   box.innerHTML = '';
 
-  // Внешние сайты открываем сразу, без промежуточной кнопки
-  if (q.external) openExternal(q.url);
-
   const card = document.createElement('div');
   card.className = 'service';
 
@@ -1350,18 +1368,6 @@ function showService(key) {
   link.rel = 'noopener';
   link.textContent = q.external ? 'Открыть на Госуслугах' : 'Перейти';
   card.appendChild(link);
-
-  // Для внешних — ещё одна попытка открыть автоматически чуть позже
-  // (в вебвью ВК иногда срабатывает только «настоящий» клик по ссылке).
-  if (q.external) {
-    setTimeout(() => {
-      try {
-        link.click();
-      } catch (error) {
-        /* показываем кнопку, пользователь нажмёт сам */
-      }
-    }, 400);
-  }
 
   const back = document.createElement('button');
   back.className = 'secondary';
