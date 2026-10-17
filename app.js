@@ -90,7 +90,7 @@ const MAX_TABLE_COLUMNS = 6;
 const MAX_TABLE_ROWS = 11;
 const STORAGE_PREFIX = 'umka_menu_v2_';
 /** Версия файла — видна в приложении и в журнале. Меняйте при каждой правке. */
-const APP_VERSION = 'v1.18 (18.10.2026)';
+const APP_VERSION = 'v1.19 (18.10.2026)';
 
 /** Варианты иконки пунктов: значение списка → (режим, эмодзи). */
 const ICON_OPTIONS = {
@@ -280,17 +280,33 @@ function buildWidgetCode() {
   // Быстрые ссылки сверху — только таблицей (в плитках лимит 10 на всё).
   if (state.quickLinksOn && state.widgetType !== 'list' && state.widgetType !== 'compact_list') {
     const columns = 2;
-    const cells = [];
-    quickLinks().forEach((q) => {
-      cells.push({ text: q.emoji + ' ' + q.text, url: quickLinkUrl(q) });
-    });
-    items.forEach((item) => {
-      cells.push({ text: itemLabel(item), url: itemUrl(item) });
-    });
     const body = [];
-    for (let i = 0; i < cells.length && body.length < MAX_TABLE_ROWS; i += columns) {
-      body.push(cells.slice(i, i + columns));
+
+    // 1. Быстрые ссылки — первые ряды
+    const quick = quickLinks();
+    for (let i = 0; i < quick.length; i += columns) {
+      const row = [];
+      for (let j = 0; j < columns; j++) {
+        const q = quick[i + j];
+        row.push(q ? { text: q.emoji + ' ' + q.text, url: quickLinkUrl(q) } : { text: '\u00A0' });
+      }
+      body.push(row);
     }
+
+    // 2. Пустой ряд-разделитель, чтобы меню визуально отделялось от разделов
+    if (quick.length) {
+      body.push([{ text: '\u00A0' }, { text: '\u00A0' }]);
+    }
+
+    // 3. Разделы с хештегами
+    const rest = [];
+    items.forEach((item) => {
+      rest.push({ text: itemLabel(item), url: itemUrl(item) });
+    });
+    for (let i = 0; i < rest.length && body.length < MAX_TABLE_ROWS; i += columns) {
+      body.push(rest.slice(i, i + columns));
+    }
+
     widget.body = body;
     return 'return ' + JSON.stringify(widget) + ';';
   }
@@ -1202,19 +1218,20 @@ function renderPosts(items, tag) {
     });
 }
 
-/** Открыть внешний сайт. В ВК надёжнее всего через away.php — это обычный
- *  переход, его не блокирует защита от всплывающих окон. */
+/** Открыть внешний сайт. Пробуем несколько способов: в вебвью ВК
+ *  срабатывает не каждый, поэтому пробуем по очереди. */
 function openExternal(url) {
+  try {
+    const win = window.open(url, '_blank');
+    if (win) return true;
+  } catch (error) {
+    /* пробуем дальше */
+  }
   try {
     window.location.replace('https://vk.com/away.php?to=' + encodeURIComponent(url));
     return true;
   } catch (error) {
-    try {
-      window.open(url, '_blank');
-      return true;
-    } catch (error2) {
-      return false;
-    }
+    return false;
   }
 }
 
@@ -1256,7 +1273,10 @@ function renderCategoryButtons() {
       });
       quick.appendChild(btn);
     });
-    box.appendChild(quick);
+    const block = document.createElement('div');
+    block.className = 'quick-block';
+    block.appendChild(quick);
+    box.appendChild(block);
   }
 
   const head2 = document.createElement('div');
@@ -1330,6 +1350,18 @@ function showService(key) {
   link.rel = 'noopener';
   link.textContent = q.external ? 'Открыть на Госуслугах' : 'Перейти';
   card.appendChild(link);
+
+  // Для внешних — ещё одна попытка открыть автоматически чуть позже
+  // (в вебвью ВК иногда срабатывает только «настоящий» клик по ссылке).
+  if (q.external) {
+    setTimeout(() => {
+      try {
+        link.click();
+      } catch (error) {
+        /* показываем кнопку, пользователь нажмёт сам */
+      }
+    }, 400);
+  }
 
   const back = document.createElement('button');
   back.className = 'secondary';

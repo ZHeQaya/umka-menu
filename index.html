@@ -89,12 +89,14 @@
     .post-link { font-size: 13px; color: var(--accent); text-decoration: none; }
     .post-tag { color: var(--accent); }
     /* быстрые ссылки (верхнее меню) */
-    .quick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
-    .quick-btn { margin: 0; padding: 8px 8px 10px; background: var(--card2); border: 1px solid var(--line);
-      border-radius: 10px; color: var(--text); display: flex; flex-direction: column; align-items: center; gap: 6px; }
-    .quick-img { width: 64px; height: 64px; border-radius: 12px; object-fit: cover; }
-    .quick-emoji { font-size: 30px; line-height: 1.1; }
-    .quick-cap { font-size: 12px; line-height: 1.25; text-align: center; }
+    .quick-block { background: var(--card2); border: 1px solid var(--line); border-radius: 14px;
+      padding: 12px; margin-bottom: 16px; }
+    .quick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .quick-btn { margin: 0; padding: 12px 10px 14px; background: var(--card); border: 1px solid var(--line);
+      border-radius: 12px; color: var(--text); display: flex; flex-direction: column; align-items: center; gap: 10px; }
+    .quick-img { width: 96px; height: 96px; border-radius: 16px; object-fit: cover; }
+    .quick-emoji { font-size: 44px; line-height: 1.1; }
+    .quick-cap { font-size: 15px; font-weight: 600; line-height: 1.25; text-align: center; }
     /* страница сервиса */
     .service { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; padding: 6px 0 4px; }
     .service-img { width: 100%; max-width: 320px; border-radius: 14px; }
@@ -216,6 +218,6 @@
 
   <!-- ?v= — защита от кеша: при каждой правке файлов увеличивайте номер -->
   <script src="vk-bridge.min.js?v=2"></script>
-  <script src="app.js?v=18"></script>
+  <script src="app.js?v=19"></script>
 </body>
 </html>
