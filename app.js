@@ -42,6 +42,7 @@ const CONFIG = {
       emoji: '🧒',
       url: 'https://vk.ru/app8181405#module=education&step=ChoosingKid&groupId=public212278594',
       descr: 'Запись ребёнка в детский сад через Госуслуги',
+      image: 'https://sun9-71.userapi.com/s/v1/s2/B32E_2kB_CMqGpMNTZnSI6dvpc2gTNi8pWOC_BEoXRVf6x1Gxc8wW7yu_dj2axAJuIHUZy49qUDfIiW4Y1fs-KvRDITF.jpg',
     },
     {
       key: 'opinion',
@@ -67,6 +68,7 @@ const CONFIG = {
       emoji: '🛡️',
       url: 'https://vk.ru/wall-212278594_7332',
       descr: 'Как защититься от мошенников — памятка',
+      image: 'https://sun9-40.userapi.com/s/v1/ig2/Wgrz20XbehENhDZhW4O7VnvrIKnHD0z96WW7l_3AdZ4tgyht--EkgXkkNagf8bEOWMezCtqPyl9StSsSI4JRswYj.jpg?as=160x160&quality=95',
     },
   ],
   items: [
@@ -88,7 +90,7 @@ const MAX_TABLE_COLUMNS = 6;
 const MAX_TABLE_ROWS = 11;
 const STORAGE_PREFIX = 'umka_menu_v2_';
 /** Версия файла — видна в приложении и в журнале. Меняйте при каждой правке. */
-const APP_VERSION = 'v1.17 (18.10.2026)';
+const APP_VERSION = 'v1.18 (18.10.2026)';
 
 /** Варианты иконки пунктов: значение списка → (режим, эмодзи). */
 const ICON_OPTIONS = {
@@ -1200,12 +1202,33 @@ function renderPosts(items, tag) {
     });
 }
 
+/** Открыть внешний сайт. В ВК надёжнее всего через away.php — это обычный
+ *  переход, его не блокирует защита от всплывающих окон. */
+function openExternal(url) {
+  try {
+    window.location.replace('https://vk.com/away.php?to=' + encodeURIComponent(url));
+    return true;
+  } catch (error) {
+    try {
+      window.open(url, '_blank');
+      return true;
+    } catch (error2) {
+      return false;
+    }
+  }
+}
+
 function renderCategoryButtons() {
   const box = $('posts-list');
   box.innerHTML = '';
 
   // Сверху — быстрые ссылки (как «меню» сообщества)
   if (state.quickLinksOn && quickLinks().length) {
+    const head = document.createElement('div');
+    head.className = 'section-head';
+    head.textContent = 'Полезное';
+    box.appendChild(head);
+
     const quick = document.createElement('div');
     quick.className = 'quick';
     quickLinks().forEach((q) => {
@@ -1228,16 +1251,18 @@ function renderCategoryButtons() {
       cap.textContent = q.text;
       btn.appendChild(cap);
       btn.addEventListener('click', () => {
-        if (q.external) {
-          showService(q.key);
-        } else {
-          window.open(q.url, '_blank');
-        }
+        if (q.external) openExternal(q.url);
+        else window.open(q.url, '_blank');
       });
       quick.appendChild(btn);
     });
     box.appendChild(quick);
   }
+
+  const head2 = document.createElement('div');
+  head2.className = 'section-head';
+  head2.textContent = 'Разделы';
+  box.appendChild(head2);
 
   const wrap = document.createElement('div');
   wrap.className = 'cats';
@@ -1271,6 +1296,9 @@ function showService(key) {
 
   const box = $('posts-list');
   box.innerHTML = '';
+
+  // Внешние сайты открываем сразу, без промежуточной кнопки
+  if (q.external) openExternal(q.url);
 
   const card = document.createElement('div');
   card.className = 'service';
