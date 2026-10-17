@@ -88,6 +88,22 @@
     .post-photo { width: 100%; border-radius: 10px; margin-bottom: 8px; display: block; }
     .post-link { font-size: 13px; color: var(--accent); text-decoration: none; }
     .post-tag { color: var(--accent); }
+    /* быстрые ссылки (верхнее меню) */
+    .quick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
+    .quick-btn { margin: 0; padding: 8px 8px 10px; background: var(--card2); border: 1px solid var(--line);
+      border-radius: 10px; color: var(--text); display: flex; flex-direction: column; align-items: center; gap: 6px; }
+    .quick-img { width: 64px; height: 64px; border-radius: 12px; object-fit: cover; }
+    .quick-emoji { font-size: 30px; line-height: 1.1; }
+    .quick-cap { font-size: 12px; line-height: 1.25; text-align: center; }
+    /* страница сервиса */
+    .service { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; padding: 6px 0 4px; }
+    .service-img { width: 100%; max-width: 320px; border-radius: 14px; }
+    .service-title { font-size: 19px; font-weight: 600; }
+    .service-descr { font-size: 14px; color: var(--muted); }
+    .service-btn { display: inline-block; margin-top: 6px; padding: 12px 18px; border-radius: 8px;
+      background: var(--accent); color: #fff; font-weight: 600; text-decoration: none; }
+    .preview-quick { margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+    .preview-quick-row { font-size: 14px; padding: 3px 0; color: var(--text); }
   </style>
 </head>
 <body>
@@ -142,6 +158,11 @@
       <option value="table">Таблица (сетка) — логотип только в левой колонке</option>
       <option value="list">Список — до 6 пунктов, логотип у каждого</option>
     </select>
+    <label for="quicklinks">Быстрые ссылки сверху (Запись в кружок, мнение, проблема, мошенники)</label>
+    <select id="quicklinks">
+      <option value="on">Показывать — первые два ряда виджета</option>
+      <option value="off">Скрыть</option>
+    </select>
     <label for="mode">Куда ведут ссылки из хештегов</label>
     <select id="mode">
       <option value="app">Список всех постов на странице приложения (рекомендуется)</option>
@@ -193,6 +214,6 @@
 
   <!-- ?v= — защита от кеша: при каждой правке файлов увеличивайте номер -->
   <script src="vk-bridge.min.js?v=2"></script>
-  <script src="app.js?v=16"></script>
+  <script src="app.js?v=17"></script>
 </body>
 </html>

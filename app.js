@@ -33,6 +33,42 @@ const CONFIG = {
   //  'wall'    — штатный поиск по записям сообщества (vk.com/wall-<ID>?q=…);
   //  'hashtag' — общий поиск ВК по хештегу (vk.com/feed?section=search&q=…).
   searchMode: 'app',
+  // Быстрые ссылки сверху виджета (как «меню» сообщества). Показывать/скрыть.
+  quickLinksOn: true,
+  quickLinks: [
+    {
+      key: 'enroll',
+      text: 'Запись в кружок',
+      emoji: '🧒',
+      url: 'https://vk.ru/app8181405#module=education&step=ChoosingKid&groupId=public212278594',
+      descr: 'Запись ребёнка в детский сад через Госуслуги',
+    },
+    {
+      key: 'opinion',
+      text: 'Высказать мнение',
+      emoji: '💬',
+      url: 'https://pos.gosuslugi.ru/og/org-activities?mun_code=49027097&utm_source=vk2&utm_medium=32&utm_campaign=1204200000366',
+      external: true,
+      descr: 'Оцените работу детского сада на портале «Решаем вместе»',
+      image: 'https://sun9-7.userapi.com/s/v1/s2/MykcTYQErEgyum6rYXps7phILQ2mAbgLwcJy8b9gsuefmJzkvQxlj6TyHw9yKGM5Q2HGGKk5Adq-IYvi4EiaqlYRiv8q.jpg',
+    },
+    {
+      key: 'problem',
+      text: 'Сообщить о проблеме',
+      emoji: '⚠️',
+      url: 'https://pos.gosuslugi.ru/form/?opaId=21227859&utm_source=vk&utm_medium=32&utm_campaign=1204200000366',
+      external: true,
+      descr: 'Сообщить о проблеме через портал «Решаем вместе»',
+      image: 'https://sun9-8.userapi.com/s/v1/s2/hUOyU22fyRril9MRk5XoMiI228pCH4ycjv5Z26iGqJTzg-bo2GydXU2ZyDKdJVKx8ARQRjLdKc2hkMVLcJpHARrZyHw8.jpg',
+    },
+    {
+      key: 'cyber',
+      text: 'Кибермошенничество',
+      emoji: '🛡️',
+      url: 'https://vk.ru/wall-212278594_7332',
+      descr: 'Как защититься от мошенников — памятка',
+    },
+  ],
   items: [
     { text: '«Умка» — это люди', hashtag: 'УмкаЭтоЛюди' },
     { text: 'Итоги недели', hashtag: 'УмкаИтогиНедели' },
@@ -52,7 +88,7 @@ const MAX_TABLE_COLUMNS = 6;
 const MAX_TABLE_ROWS = 11;
 const STORAGE_PREFIX = 'umka_menu_v2_';
 /** Версия файла — видна в приложении и в журнале. Меняйте при каждой правке. */
-const APP_VERSION = 'v1.16 (10.10.2026)';
+const APP_VERSION = 'v1.17 (18.10.2026)';
 
 /** Варианты иконки пунктов: значение списка → (режим, эмодзи). */
 const ICON_OPTIONS = {
@@ -87,14 +123,30 @@ const state = {
   columns: CONFIG.columns,
   widgetType: CONFIG.widgetType,
   searchMode: CONFIG.searchMode,
+  quickLinksOn: CONFIG.quickLinksOn,
   items: CONFIG.items.map((i) => Object.assign({}, i)),
   tag: null,
+  go: null,
   groupId: CONFIG.groupId ? String(CONFIG.groupId) : null,
   role: null,
   platform: null,
   appId: CONFIG.appId ? String(CONFIG.appId) : null,
   bridgeOk: false,
 };
+
+/** Ссылка быстрого пункта для виджета.
+ *  Внешние сайты ВК в виджете запрещены, поэтому они идут через страницу
+ *  приложения: vk.com/app<ID>_-<GROUP>#go=<ключ>. */
+function quickLinkUrl(q) {
+  if (!q.external) return q.url;
+  const appId = state.appId || CONFIG.appId;
+  const gid = String(state.groupId || CONFIG.groupId || '').replace('-', '');
+  return 'https://vk.com/app' + appId + (gid ? '_-' + gid : '') + '#go=' + encodeURIComponent(q.key);
+}
+
+function quickLinks() {
+  return (CONFIG.quickLinks || []).filter((q) => q && q.text);
+}
 
 /** Подпись пункта. В режиме эмодзи — с медвежонком перед названием. */
 function itemLabel(item) {
@@ -223,6 +275,24 @@ function buildWidgetCode() {
   const widget = { title: state.title };
   const iconId = itemIconId();
 
+  // Быстрые ссылки сверху — только таблицей (в плитках лимит 10 на всё).
+  if (state.quickLinksOn && state.widgetType !== 'list' && state.widgetType !== 'compact_list') {
+    const columns = 2;
+    const cells = [];
+    quickLinks().forEach((q) => {
+      cells.push({ text: q.emoji + ' ' + q.text, url: quickLinkUrl(q) });
+    });
+    items.forEach((item) => {
+      cells.push({ text: itemLabel(item), url: itemUrl(item) });
+    });
+    const body = [];
+    for (let i = 0; i < cells.length && body.length < MAX_TABLE_ROWS; i += columns) {
+      body.push(cells.slice(i, i + columns));
+    }
+    widget.body = body;
+    return 'return ' + JSON.stringify(widget) + ';';
+  }
+
   if (state.widgetType === 'tiles') {
     // Плитки: у каждой — логотип Умки (иконка приложения) и подпись.
     widget.tiles = items.slice(0, 10).map((item) => {
@@ -321,6 +391,17 @@ function validate() {
     }
     if (itemLabel(item).length > 100) problems.push('Слишком длинное название: ' + item.text);
   });
+  if (state.quickLinksOn) {
+    quickLinks().forEach((q) => {
+      const url = quickLinkUrl(q);
+      if (!/^https:\/\/(vk\.com|vk\.ru|vk\.me)\//.test(url)) {
+        problems.push('Ссылка «' + q.text + '» должна быть внутренней ВК (внешние сайты — через страницу приложения).');
+      }
+      if (url.length > 200) {
+        problems.push('Ссылка «' + q.text + '» длиннее 200 символов (' + url.length + ').');
+      }
+    });
+  }
   if (state.title.length > 100) problems.push('Заголовок длиннее 100 символов.');
   return problems;
 }
@@ -337,6 +418,7 @@ function serializeConfig() {
     columns: state.columns,
     widgetType: state.widgetType,
     searchMode: state.searchMode,
+    quickLinksOn: state.quickLinksOn,
     items: state.items,
   });
 }
@@ -351,6 +433,7 @@ function applyConfig(data) {
   if (data.widgetType === 'table' || data.widgetType === 'list' || data.widgetType === 'tiles') {
     state.widgetType = data.widgetType;
   }
+  if (typeof data.quickLinksOn === 'boolean') state.quickLinksOn = data.quickLinksOn;
   if (data.searchMode === 'community') state.searchMode = 'wall';
   else if (['app', 'wall', 'hashtag'].indexOf(data.searchMode) >= 0) state.searchMode = data.searchMode;
   if (Array.isArray(data.items) && data.items.length) {
@@ -427,7 +510,20 @@ function renderPreview() {
   title.textContent = state.title;
   box.appendChild(title);
 
-  if (state.widgetType === 'tiles') {
+  // Быстрые ссылки — как в виджете, первыми
+  if (state.quickLinksOn) {
+    const quick = document.createElement('div');
+    quick.className = 'preview-quick';
+    quickLinks().forEach((q) => {
+      const row = document.createElement('div');
+      row.className = 'preview-quick-row';
+      row.textContent = q.emoji + ' ' + q.text;
+      quick.appendChild(row);
+    });
+    box.appendChild(quick);
+  }
+
+  if (state.widgetType === 'tiles' && !state.quickLinksOn) {
     const grid = document.createElement('div');
     grid.className = 'widget-tiles';
     state.items.slice(0, 10).forEach((item) => {
@@ -507,6 +603,7 @@ function renderEditor() {
   $('mode').value = state.searchMode;
   $('iconmode').value = currentIconOption();
   $('type').value = state.widgetType;
+  if ($('quicklinks')) $('quicklinks').value = state.quickLinksOn ? 'on' : 'off';
   $('group').value = state.groupId ? String(state.groupId).replace('-', '') : ($('group').value || '');
 }
 
@@ -665,6 +762,7 @@ function onReset() {
   state.columns = CONFIG.columns;
   state.widgetType = CONFIG.widgetType;
   state.searchMode = CONFIG.searchMode;
+  state.quickLinksOn = CONFIG.quickLinksOn;
   state.items = CONFIG.items.map((i) => Object.assign({}, i));
   renderAll();
   log('Возвращены стандартные пункты. Нажмите «Сохранить», чтобы записать их в хранилище.', 'muted');
@@ -799,9 +897,30 @@ function readLaunchFragment() {
   }
 }
 
+/** Ключ быстрой ссылки из фрагмента вида go=opinion. */
+function goFromFragment(raw) {
+  const s = String(raw || '').replace(/^#/, '');
+  if (!s) return null;
+  try {
+    const v = new URLSearchParams(s).get('go');
+    return v ? String(v) : null;
+  } catch (error) {
+    return null;
+  }
+}
+
 /** Новый фрагмент из надёжного источника. */
 function setLiveFragment(raw, source) {
   if (!raw || raw === liveFragment) return;
+
+  const go = goFromFragment(raw);
+  if (go) {
+    liveFragment = raw;
+    log('Ссылка изменилась (' + source + '): сервис ' + go, 'muted');
+    showService(go);
+    return;
+  }
+
   const tag = tagFromFragment(raw);
 
   // Тот же хештег — не дёргаем список (иначе он мигает)
@@ -861,11 +980,13 @@ function startTagWatch() {
 /** Перечитать ссылку и показать то, что в ней. Используется кнопкой «Обновить». */
 function refreshFromLink() {
   const fromUrl = location.hash ? location.hash.replace(/^#/, '') : '';
-  const tag =
-    tagFromFragment(liveFragment) ||
-    (!eventsSeen ? tagFromFragment(fromUrl) : null) ||
-    getTagFromLaunch() ||
-    state.tag;
+  const raw = liveFragment || (!eventsSeen ? fromUrl : '');
+  const go = goFromFragment(raw);
+  if (go && quickLinks().some((q) => q.key === go)) {
+    showService(go);
+    return;
+  }
+  const tag = tagFromFragment(raw) || getTagFromLaunch() || state.tag;
   if (tag) showPostsView(tag);
   else showPostsView(null);
 }
@@ -1082,6 +1203,42 @@ function renderPosts(items, tag) {
 function renderCategoryButtons() {
   const box = $('posts-list');
   box.innerHTML = '';
+
+  // Сверху — быстрые ссылки (как «меню» сообщества)
+  if (state.quickLinksOn && quickLinks().length) {
+    const quick = document.createElement('div');
+    quick.className = 'quick';
+    quickLinks().forEach((q) => {
+      const btn = document.createElement('button');
+      btn.className = 'quick-btn';
+      if (q.image) {
+        const img = document.createElement('img');
+        img.className = 'quick-img';
+        img.src = q.image;
+        img.alt = '';
+        btn.appendChild(img);
+      } else {
+        const emo = document.createElement('span');
+        emo.className = 'quick-emoji';
+        emo.textContent = q.emoji || '';
+        btn.appendChild(emo);
+      }
+      const cap = document.createElement('span');
+      cap.className = 'quick-cap';
+      cap.textContent = q.text;
+      btn.appendChild(cap);
+      btn.addEventListener('click', () => {
+        if (q.external) {
+          showService(q.key);
+        } else {
+          window.open(q.url, '_blank');
+        }
+      });
+      quick.appendChild(btn);
+    });
+    box.appendChild(quick);
+  }
+
   const wrap = document.createElement('div');
   wrap.className = 'cats';
   state.items.forEach((item) => {
@@ -1095,6 +1252,68 @@ function renderCategoryButtons() {
     wrap.appendChild(btn);
   });
   box.appendChild(wrap);
+}
+
+/** Страница быстрой ссылки: картинка, описание и кнопка перехода. */
+function showService(key) {
+  const q = quickLinks().filter((x) => x.key === key)[0];
+  if (!q) {
+    showPostsView(null);
+    return;
+  }
+  $('posts-view').hidden = false;
+  $('admin-view').hidden = true;
+  finishLoading();
+  state.tag = null;
+  state.go = key;
+  $('posts-title').textContent = q.text;
+  $('posts-sub').textContent = '';
+
+  const box = $('posts-list');
+  box.innerHTML = '';
+
+  const card = document.createElement('div');
+  card.className = 'service';
+
+  if (q.image) {
+    const img = document.createElement('img');
+    img.className = 'service-img';
+    img.src = q.image;
+    img.alt = '';
+    card.appendChild(img);
+  }
+
+  const t = document.createElement('div');
+  t.className = 'service-title';
+  t.textContent = q.text;
+  card.appendChild(t);
+
+  if (q.descr) {
+    const d = document.createElement('div');
+    d.className = 'service-descr';
+    d.textContent = q.descr;
+    card.appendChild(d);
+  }
+
+  const link = document.createElement('a');
+  link.className = 'service-btn';
+  link.href = q.url;
+  link.target = '_blank';
+  link.rel = 'noopener';
+  link.textContent = q.external ? 'Открыть на Госуслугах' : 'Перейти';
+  card.appendChild(link);
+
+  const back = document.createElement('button');
+  back.className = 'secondary';
+  back.textContent = '← Все разделы';
+  back.addEventListener('click', () => {
+    state.go = null;
+    showPostsView(null);
+  });
+  card.appendChild(back);
+
+  box.appendChild(card);
+  applyChromeVisibility();
 }
 
 /** Счётчик запросов: чтобы медленный старый ответ не затёр новый список. */
@@ -1162,6 +1381,7 @@ function showPostsView(tag) {
   finishLoading();
   $('page-title').textContent = 'Умка · публикации';
   state.tag = tag || null;
+  state.go = null;
   if (tag) {
     $('posts-title').textContent = '#' + tag;
     $('posts-sub').textContent = 'Все записи сообщества с этим хештегом.';
@@ -1251,12 +1471,15 @@ async function init() {
   await loadFromStorage();
   renderAll();
 
-  // Определяем, что показать: страницу постов по хештегу или настройки меню.
+  // Определяем, что показать: сервис, посты по хештегу или настройки меню.
   launchFragment = readLaunchFragment();
   liveFragment = launchFragment;
+  const go = goFromFragment(launchFragment) || goFromFragment(location.hash);
   const tag = getTagFromLaunch();
   const isAdmin = isAdminUser();
-  if (tag) {
+  if (go && quickLinks().some((q) => q.key === go)) {
+    showService(go);
+  } else if (tag) {
     showPostsView(tag);
   } else if (isAdmin) {
     showAdminView();
@@ -1292,6 +1515,12 @@ document.addEventListener('DOMContentLoaded', () => {
     state.widgetType = $('type').value;
     renderPreview();
   });
+  if ($('quicklinks')) {
+    $('quicklinks').addEventListener('change', () => {
+      state.quickLinksOn = $('quicklinks').value === 'on';
+      renderPreview();
+    });
+  }
   if ($('btn-refresh')) {
     $('btn-refresh').addEventListener('click', refreshFromLink);
   }
