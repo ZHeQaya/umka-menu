@@ -40,7 +40,9 @@ const CONFIG = {
       key: 'enroll',
       text: 'Запись в кружок',
       emoji: '🧒',
-      url: 'https://vk.ru/app8181405#module=education&step=ChoosingKid&groupId=public212278594',
+      // Внутренние ссылки пишем через vk.com: vk.ru в клиентах ВК может считаться
+      // «чужой» ссылкой и открываться в отдельном (встроенном) окне.
+      url: 'https://vk.com/app8181405#module=education&step=ChoosingKid&groupId=public212278594',
       descr: 'Запись ребёнка в детский сад через Госуслуги',
       image: 'https://sun9-71.userapi.com/s/v1/s2/B32E_2kB_CMqGpMNTZnSI6dvpc2gTNi8pWOC_BEoXRVf6x1Gxc8wW7yu_dj2axAJuIHUZy49qUDfIiW4Y1fs-KvRDITF.jpg',
     },
@@ -66,7 +68,9 @@ const CONFIG = {
       key: 'cyber',
       text: 'Кибермошенничество',
       emoji: '🛡️',
-      url: 'https://vk.ru/wall-212278594_7332',
+      // Прямая внутренняя ссылка на запись: в виджете она открывается
+      // сразу на основной странице ВК, без окна приложения.
+      url: 'https://vk.com/wall-212278594_7332',
       descr: 'Как защититься от мошенников — памятка',
       image: 'https://sun9-40.userapi.com/s/v1/ig2/Wgrz20XbehENhDZhW4O7VnvrIKnHD0z96WW7l_3AdZ4tgyht--EkgXkkNagf8bEOWMezCtqPyl9StSsSI4JRswYj.jpg?as=160x160&quality=95',
     },
@@ -90,7 +94,7 @@ const MAX_TABLE_COLUMNS = 6;
 const MAX_TABLE_ROWS = 11;
 const STORAGE_PREFIX = 'umka_menu_v2_';
 /** Версия файла — видна в приложении и в журнале. Меняйте при каждой правке. */
-const APP_VERSION = 'v1.20 (18.10.2026)';
+const APP_VERSION = 'v1.21 (18.10.2026)';
 
 /** Варианты иконки пунктов: значение списка → (режим, эмодзи). */
 const ICON_OPTIONS = {
@@ -1218,43 +1222,86 @@ function renderPosts(items, tag) {
     });
 }
 
-/** Открыть внешний сайт напрямую (без away.php — он показывает страницу ВК
- *  в отдельном окне). VK откроет ссылку в своём встроенном браузере. */
-function openExternal(url) {
+/** Открыть ссылку так, как будто её нажали на обычной странице ВК, — на
+ *  ОСНОВНОЙ странице, а не во встроенном окне приложения.
+ *
+ *  Приложение живёт внутри окна/iframe ВК. Обычный window.open(...) даёт
+ *  отдельное (встроенное) окно — именно его и не хочется. Поэтому сначала
+ *  уводим на ссылку саму страницу ВК:
+ *    • приложение в iframe (компьютер, мобильный сайт) — меняем адрес
+ *      верхнего окна: window.top.location;
+ *    • в мобильном клиенте приложение и есть окно — обычный переход.
+ *  Если ВК запретил переход (защита от подмены страницы), остаётся новое окно.
+ *  Возвращает true, если перейти удалось сразу. */
+function openInMainWindow(url) {
+  if (!url) return false;
+
+  const inFrame = window.top && window.top !== window;
+  if (inFrame) {
+    try {
+      window.top.location.href = url;
+      return true;
+    } catch (error) {
+      /* ВК не разрешил менять адрес основной страницы — пробуем дальше */
+    }
+  } else {
+    try {
+      window.location.href = url;
+      return true;
+    } catch (error) {
+      /* обычный переход тоже не удался — пробуем дальше */
+    }
+  }
+
   try {
-    window.open(url, '_blank');
-    return true;
+    const win = window.open(url, '_blank');
+    return !!win;
   } catch (error) {
     return false;
   }
 }
 
-/** Открыть быстрый пункт: внутренние — через VK Bridge (в основном окне ВК),
- *  внешние — напрямую на сайт. */
+/** Автоматический переход со страницы пункта на его цель.
+ *
+ *  ВК запрещает внешние ссылки в виджете, поэтому пункты «Госуслуги» идут
+ *  через страницу приложения. Чтобы не заставлять человека нажимать кнопку,
+ *  сразу уводим на цель. Браузер может не разрешить переход без клика —
+ *  тогда на странице остаётся кнопка «Открыть на Госуслугах» / «Перейти». */
+const autoOpened = {};
+
+function autoOpenService(q) {
+  if (!q) return false;
+  // Один раз за запуск для каждого пункта: иначе «Обновить» снова уводил бы
+  // со страницы, куда человек уже вернулся.
+  if (autoOpened[q.key]) return false;
+  autoOpened[q.key] = true;
+  // «Запись в кружок» — другое мини-приложение, у него свой способ открытия
+  if (q.key === 'enroll' && bridgeUsable()) {
+    openQuick(q);
+    return true;
+  }
+  return openInMainWindow(q.url);
+}
+
+/** Открыть быстрый пункт.
+ *  • «Запись в кружок» — другое мини-приложение ВК, его правильно открыть
+ *    через VK Bridge (VKWebAppOpenApp);
+ *  • остальные пункты (внешние сайты, запись сообщества) — сразу на основной
+ *    странице, без встроенного окна приложения. */
 function openQuick(q) {
   if (!q) return;
 
-  if (!q.external && bridgeUsable()) {
-    // Запись в кружок — другое мини-приложение ВК
-    if (q.key === 'enroll') {
-      vkBridge
-        .send('VKWebAppOpenApp', {
-          app_id: 8181405,
-          location: 'module=education&step=ChoosingKid&groupId=public212278594',
-        })
-        .catch(() => window.open(q.url, '_blank'));
-      return;
-    }
-    // Кибермошенничество — запись сообщества
-    if (q.key === 'cyber') {
-      vkBridge
-        .send('VKWebAppOpenWallPost', { owner_id: -212278594, post_id: 7332 })
-        .catch(() => window.open(q.url, '_blank'));
-      return;
-    }
+  if (q.key === 'enroll' && bridgeUsable()) {
+    vkBridge
+      .send('VKWebAppOpenApp', {
+        app_id: 8181405,
+        location: 'module=education&step=ChoosingKid&groupId=public212278594',
+      })
+      .catch(() => openInMainWindow(q.url));
+    return;
   }
 
-  window.open(q.url, '_blank');
+  openInMainWindow(q.url);
 }
 
 function renderCategoryButtons() {
@@ -1364,9 +1411,13 @@ function showService(key) {
   const link = document.createElement('a');
   link.className = 'service-btn';
   link.href = q.url;
-  link.target = '_blank';
+  link.target = '_blank'; // запасной вариант, если обработчик ниже не сработает
   link.rel = 'noopener';
   link.textContent = q.external ? 'Открыть на Госуслугах' : 'Перейти';
+  link.addEventListener('click', (event) => {
+    // Открываем на основной странице ВК, а не во встроенном окне приложения.
+    if (openInMainWindow(q.url)) event.preventDefault();
+  });
   card.appendChild(link);
 
   const back = document.createElement('button');
@@ -1380,6 +1431,14 @@ function showService(key) {
 
   box.appendChild(card);
   applyChromeVisibility();
+
+  // Пункт нажали в виджете — сразу уводим на цель, без лишнего нажатия кнопки.
+  // Если ВК или браузер не разрешил переход без клика, остаётся кнопка выше.
+  if (autoOpenService(q)) {
+    log('Открываю ' + (q.external ? 'сайт' : 'запись') + ' на основной странице…', 'muted');
+  } else {
+    log('Переход откроется по кнопке «' + link.textContent + '».', 'muted');
+  }
 }
 
 /** Счётчик запросов: чтобы медленный старый ответ не затёр новый список. */
